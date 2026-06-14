@@ -62,3 +62,14 @@ class SecretRequestRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class RequestEventRead(BaseModel):
+    id: uuid.UUID
+    secret_request_id: uuid.UUID
+    status: RequestStatus
+    actor: str
+    detail: str | None
+    timestamp: datetime
+
+    model_config = {"from_attributes": True}
