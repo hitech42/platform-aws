@@ -8,6 +8,14 @@ import sys
 
 import structlog
 
+# Module-level list used as the structlog processor chain. Using a stable list
+# object (modified in-place on each configure_logging call) ensures that
+# structlog.testing.capture_logs() — which modifies the current processors list
+# in-place — correctly intercepts log calls even when configure_logging has been
+# called multiple times (e.g. integration tests followed by unit tests in the
+# same process).
+_PROCESSORS: list[structlog.types.Processor] = []
+
 
 def configure_logging(log_level: str = "INFO") -> None:
     level = getattr(logging, log_level.upper(), logging.INFO)
@@ -20,11 +28,18 @@ def configure_logging(log_level: str = "INFO") -> None:
         structlog.processors.StackInfoRenderer(),
     ]
 
-    structlog.configure(
-        processors=[
+    # Populate _PROCESSORS in-place so any bound loggers that already hold a
+    # reference to this list see the updated chain without needing to rebind.
+    _PROCESSORS.clear()
+    _PROCESSORS.extend(
+        [
             *shared_processors,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
+        ]
+    )
+
+    structlog.configure(
+        processors=_PROCESSORS,
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),

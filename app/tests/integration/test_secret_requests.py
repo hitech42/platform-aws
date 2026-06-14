@@ -4,12 +4,12 @@ Secrets Manager calls are mocked — we test the HTTP/DB layer, not AWS.
 LocalStack is exercised separately via docker-compose.
 """
 
+import threading
 import uuid
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
-
+from sqlalchemy.orm import Session
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -240,6 +240,123 @@ def test_approve_not_found_returns_404(client: TestClient) -> None:
         json={"approver_email": "ops@co.com"},
     )
     assert r.status_code == 404
+
+
+# ── event ordering and edge cases ─────────────────────────────────────────────
+
+
+def test_list_events_returns_empty_list_when_no_events(
+    client: TestClient,
+    committed_db: Session,
+) -> None:
+    """A SecretRequest with zero events (not creatable via the API) returns 200 []."""
+    from app.src.models.secret_request import SecretRequest
+
+    # Create a service via the API so we have a valid FK target.
+    svc = _create_service(client)
+
+    # Insert a raw SecretRequest without going through create_request(), which
+    # would normally write a PENDING event. Commit immediately so the client's
+    # separate session can see the row.
+    raw_req = SecretRequest(
+        service_id=uuid.UUID(svc["id"]),
+        logical_name="no-events-key",
+        environment="dev",
+        status="PENDING",
+    )
+    committed_db.add(raw_req)
+    committed_db.flush()
+    req_id = raw_req.id
+    committed_db.commit()
+
+    r = client.get(f"/api/v1/secret-requests/{req_id}/events")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_list_events_ordering_preserved_for_same_second_events(
+    client: TestClient,
+) -> None:
+    """Events written in the same DB transaction share a timestamp; seq ensures order."""
+    svc = _create_service(client)
+    req = _create_request(client, svc["id"])
+
+    with patch(
+        "app.src.services.secrets_manager.create_app_secret",
+        return_value=_FAKE_ARN,
+    ):
+        client.post(
+            f"/api/v1/secret-requests/{req['id']}/approve",
+            json={"approver_email": "approver@co.com"},
+        )
+
+    events = client.get(f"/api/v1/secret-requests/{req['id']}/events").json()
+    statuses = [e["status"] for e in events]
+    # APPROVED and PROVISIONING are flushed in the same transaction and therefore
+    # share an identical now() timestamp; the seq tiebreaker must keep them ordered.
+    assert statuses == ["PENDING", "APPROVED", "PROVISIONING", "PROVISIONED"]
+
+
+def test_approve_failed_detail_is_truncated_and_contains_no_traceback(
+    client: TestClient,
+) -> None:
+    """The FAILED event detail must be ≤ 2000 chars and must not expose stack traces."""
+    svc = _create_service(client)
+    req = _create_request(client, svc["id"])
+
+    long_message = "X" * 5000
+
+    with patch(
+        "app.src.services.secrets_manager.create_app_secret",
+        side_effect=RuntimeError(long_message),
+    ):
+        r = client.post(
+            f"/api/v1/secret-requests/{req['id']}/approve",
+            json={"approver_email": "ops@co.com"},
+        )
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "FAILED"
+
+    events = client.get(f"/api/v1/secret-requests/{req['id']}/events").json()
+    failed = next(e for e in events if e["status"] == "FAILED")
+    assert len(failed["detail"]) <= 2000
+    assert "Traceback" not in (failed["detail"] or "")
+    assert "File " not in (failed["detail"] or "")
+
+
+def test_approve_concurrent_calls_second_gets_409(client: TestClient) -> None:
+    """SELECT FOR UPDATE prevents double-provisioning under concurrent approve calls."""
+    svc = _create_service(client)
+    req = _create_request(client, svc["id"])
+
+    results: list[int] = []
+    lock = threading.Lock()
+    # Barrier ensures both threads enter the HTTP call at the same instant,
+    # maximising the chance that both DB transactions overlap.
+    barrier = threading.Barrier(2)
+
+    def approve() -> None:
+        barrier.wait()
+        r = client.post(
+            f"/api/v1/secret-requests/{req['id']}/approve",
+            json={"approver_email": "ops@co.com"},
+        )
+        with lock:
+            results.append(r.status_code)
+
+    with patch(
+        "app.src.services.secrets_manager.create_app_secret",
+        return_value=_FAKE_ARN,
+    ):
+        t1 = threading.Thread(target=approve)
+        t2 = threading.Thread(target=approve)
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
+
+    assert sorted(results) == [200, 409], f"Expected exactly one 200 and one 409, got {results}"
 
 
 def test_approve_non_pending_request_returns_409(client: TestClient) -> None:

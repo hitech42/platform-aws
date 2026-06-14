@@ -121,10 +121,7 @@ def test_service_validation_error_returns_422() -> None:
 
 def test_field_absent_when_none() -> None:
     """field should not appear in the JSON body when it is None."""
-    r = client.get("/_test/conflict")
-    # ConflictError raised without field argument → no field key
-    # (we need a route that raises without field)
-    # Re-test with a fresh exception that has no field
+    # ConflictError raised without field argument → no field key.
     exc = ConflictError("no field here")
     assert exc.field is None
 
@@ -132,7 +129,11 @@ def test_field_absent_when_none() -> None:
 def test_pydantic_request_validation_uses_standard_shape() -> None:
     """A missing/invalid request body should return our error shape, not FastAPI's default."""
     # POST to a route that expects a dict body but we send nothing
-    r = client.post("/_test/body-validation", content="not-json", headers={"content-type": "application/json"})
+    r = client.post(
+        "/_test/body-validation",
+        content="not-json",
+        headers={"content-type": "application/json"},
+    )
     assert r.status_code == 422
     body = r.json()
     assert "error" in body

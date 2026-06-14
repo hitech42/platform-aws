@@ -37,7 +37,10 @@ def test_generate_value_false_raises_validation_error() -> None:
 def test_create_app_secret_returns_arn() -> None:
     expected_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:platform/svc/dev/db-pass"
     mock_client = MagicMock()
-    mock_client.create_secret.return_value = {"ARN": expected_arn, "Name": "platform/svc/dev/db-pass"}
+    mock_client.create_secret.return_value = {
+        "ARN": expected_arn,
+        "Name": "platform/svc/dev/db-pass",
+    }
 
     with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
         arn = create_app_secret(
@@ -162,7 +165,9 @@ def test_other_client_error_propagates() -> None:
 
 
 def test_endpoint_url_forwarded_to_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.src.services.secrets_manager.settings.aws_endpoint_url", "http://localhost:4566")
+    monkeypatch.setattr(
+        "app.src.services.secrets_manager.settings.aws_endpoint_url", "http://localhost:4566"
+    )
 
     captured_kwargs: dict[str, object] = {}
 

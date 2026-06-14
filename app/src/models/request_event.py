@@ -1,8 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, text
-from sqlalchemy import Uuid
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.src.models.base import Base
@@ -16,6 +15,11 @@ class RequestEvent(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
+    # seq is a DB-generated monotonic counter used as a sort tiebreaker.
+    # Postgres GENERATED ALWAYS AS IDENTITY increments per-INSERT even within
+    # the same transaction, so events flushed in the same transaction (and
+    # therefore sharing an identical now() timestamp) are still ordered correctly.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
     secret_request_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True, native_uuid=True),
         ForeignKey("secret_requests.id", ondelete="CASCADE"),

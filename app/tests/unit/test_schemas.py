@@ -1,11 +1,12 @@
 """Unit tests for Pydantic schemas — no DB required."""
 
 import uuid
+from datetime import UTC
 
 import pytest
 from pydantic import ValidationError
 
-from app.src.schemas.secret_request import SecretRequestCreate, SecretRequestRead
+from app.src.schemas.secret_request import ApproveRequest, SecretRequestCreate, SecretRequestRead
 from app.src.schemas.service import ServiceCreate, ServiceRead
 
 
@@ -28,6 +29,18 @@ class TestServiceCreate:
         with pytest.raises(ValidationError):
             ServiceCreate(name="x", team="y")  # type: ignore[call-arg]
 
+    def test_invalid_email_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ServiceCreate(name="x", team="y", owner_email="not-an-email")  # type: ignore[arg-type]
+
+    def test_empty_name_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ServiceCreate(name="", team="platform", owner_email="eng@co.com")
+
+    def test_name_too_long_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ServiceCreate(name="x" * 101, team="platform", owner_email="eng@co.com")
+
 
 class TestServiceRead:
     def test_from_attributes(self) -> None:
@@ -39,7 +52,7 @@ class TestServiceRead:
             repo_url = None
             from datetime import datetime, timezone
 
-            created_at = datetime.now(timezone.utc)
+            created_at = datetime.now(UTC)
 
         read = ServiceRead.model_validate(FakeORM(), from_attributes=True)
         assert isinstance(read.id, uuid.UUID)
@@ -80,6 +93,31 @@ class TestSecretRequestCreate:
         )
         assert req.description == "Key for downstream calls"
 
+    def test_empty_logical_name_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            SecretRequestCreate(
+                service_id=uuid.uuid4(),
+                logical_name="",
+                environment="dev",
+            )
+
+    def test_logical_name_too_long_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            SecretRequestCreate(
+                service_id=uuid.uuid4(),
+                logical_name="x" * 101,
+                environment="dev",
+            )
+
+    def test_description_too_long_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            SecretRequestCreate(
+                service_id=uuid.uuid4(),
+                logical_name="api-key",
+                environment="dev",
+                description="x" * 501,
+            )
+
 
 class TestSecretRequestRead:
     def test_invalid_status_in_read_schema(self) -> None:
@@ -95,3 +133,13 @@ class TestSecretRequestRead:
                 created_at=__import__("datetime").datetime.now(),
                 updated_at=__import__("datetime").datetime.now(),
             )
+
+
+class TestApproveRequest:
+    def test_valid_email(self) -> None:
+        req = ApproveRequest(approver_email="ops@co.com")
+        assert req.approver_email == "ops@co.com"
+
+    def test_invalid_email_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ApproveRequest(approver_email="not-an-email")  # type: ignore[arg-type]

@@ -12,9 +12,7 @@ router = APIRouter(prefix="/services", tags=["services"])
 
 
 @router.post("", status_code=201, response_model=ServiceRead)
-def create_service(
-    body: ServiceCreate, db: Session = Depends(get_db)
-) -> ServiceRead:
+def create_service(body: ServiceCreate, db: Session = Depends(get_db)) -> ServiceRead:
     service = service_catalog.create_service(db, body)
     db.commit()
     db.refresh(service)
@@ -37,8 +35,6 @@ def list_services(
 
 
 @router.get("/{service_id}", response_model=ServiceRead)
-def get_service(
-    service_id: uuid.UUID, db: Session = Depends(get_db)
-) -> ServiceRead:
+def get_service(service_id: uuid.UUID, db: Session = Depends(get_db)) -> ServiceRead:
     service = service_catalog.get_service(db, service_id)
     return ServiceRead.model_validate(service)

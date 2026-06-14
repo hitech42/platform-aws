@@ -1,13 +1,13 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 
 class ServiceCreate(BaseModel):
-    name: str
-    team: str
-    owner_email: str
+    name: str = Field(min_length=1, max_length=100)
+    team: str = Field(min_length=1, max_length=100)
+    owner_email: EmailStr
     repo_url: str | None = None
 
 

@@ -1,8 +1,16 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func, text
-from sqlalchemy import Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.src.models.base import Base
@@ -24,9 +32,7 @@ VALID_STATUSES: tuple[str, ...] = (
 # requires ALTER TYPE ... ADD VALUE which cannot be rolled back inside a
 # transaction — a critical limitation for zero-downtime migrations on Aurora.
 _ENV_CHECK = "environment IN ('dev', 'staging', 'prod')"
-_STATUS_CHECK = (
-    "status IN ('PENDING', 'APPROVED', 'PROVISIONING', 'PROVISIONED', 'FAILED')"
-)
+_STATUS_CHECK = "status IN ('PENDING', 'APPROVED', 'PROVISIONING', 'PROVISIONED', 'FAILED')"
 
 
 class SecretRequest(Base):
@@ -45,9 +51,7 @@ class SecretRequest(Base):
     )
     logical_name: Mapped[str] = mapped_column(String(255), nullable=False)
     environment: Mapped[str] = mapped_column(String(10), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="PENDING"
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="PENDING")
     secret_arn: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

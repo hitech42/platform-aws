@@ -171,15 +171,81 @@ All primary keys use `sqlalchemy.Uuid` (SQLAlchemy 2.x portable type, resolves t
 
 ### Integration test approach
 
-Integration tests use `testcontainers[postgres]` to spin up an ephemeral Postgres container and run Alembic migrations against it. They are self-contained (no locally-running Postgres needed) and can run in any environment with Docker.
+Integration tests support two execution modes, selected by the `DATABASE_URL` environment variable:
+
+- **Local dev** (`DATABASE_URL` not set): `testcontainers` spins up an ephemeral Postgres 16 container per test module. Requires Docker; does not touch a locally-running Postgres.
+- **CI** (`DATABASE_URL` set): the external Postgres service container provided by GitHub Actions is used directly. testcontainers is bypassed entirely.
 
 ```bash
 pytest app/tests/unit          # fast, no Docker
-pytest app/tests/integration   # requires Docker
+pytest app/tests/integration   # requires Docker (local dev path)
 pytest app/tests               # both
+DATABASE_URL=postgresql://... pytest app/tests/integration  # CI / external DB
 ```
 
-The `conftest.py` in `app/tests/integration/` sets `script_location` to an absolute path so the tests work regardless of pytest invocation CWD.
+The `conftest.py` in `app/tests/integration/` sets `script_location` to an absolute path so the tests work regardless of pytest invocation CWD. The conditional fixture definition at module level (`if os.environ.get("DATABASE_URL"): ... else: ...`) provides clean dual-mode support with different scopes: `session` for CI (migrations once per suite), `module` for local dev (fresh DB per test module).
+
+## Observability
+
+### Request logging
+
+`app/src/core/middleware.py` contains `RequestLoggingMiddleware` (a `BaseHTTPMiddleware` subclass added last in `main.py`, so it wraps all other middleware). It emits one structured log event per request:
+
+```json
+{
+  "event": "request",
+  "method": "POST",
+  "path": "/api/v1/secret-requests/…/approve",
+  "status_code": 200,
+  "duration_ms": 42,
+  "secret_request_id": "…",   // present when path matches UUID pattern
+  "from_status": "PENDING",   // present when approve route sets request.state
+  "to_status": "PROVISIONED"  // present when approve route sets request.state
+}
+```
+
+Health paths (`/healthz`, `/readyz`) are logged at `DEBUG` to suppress noise in CloudWatch when load-balancer health checks run every few seconds.
+
+### Provisioning outcome events
+
+The `approve` route emits a dedicated `secret_provisioning_outcome` log event after every Secrets Manager call so CloudWatch Logs metric filters can count successes and failures without parsing request logs:
+
+```python
+# success
+log.info("secret_provisioning_outcome", outcome="provisioned", request_id=…, environment=…, arn=…)
+# failure
+log.warning("secret_provisioning_outcome", outcome="failed", request_id=…, environment=…, error=…)
+```
+
+Example CloudWatch Logs metric filter patterns:
+- Success counter: `{ $.event = "secret_provisioning_outcome" && $.outcome = "provisioned" }`
+- Failure alarm: `{ $.event = "secret_provisioning_outcome" && $.outcome = "failed" }`
+
+**Do not implement actual CloudWatch API calls in application code** — metric filters on the log group are the ops-team's responsibility and keep the app free of CloudWatch SDK dependencies.
+
+### structlog processor list stability
+
+`configure_logging()` maintains a module-level `_PROCESSORS` list that is always cleared and repopulated **in place**. This is required because `structlog.testing.capture_logs()` modifies `get_config()["processors"]` in place, and `cache_logger_on_first_use=True` causes bound loggers to hold a reference to the list object passed at `configure()` time. If `configure_logging()` created a new list each call, cached loggers would hold a stale reference that `capture_logs()` would never modify.
+
+## CI / GitHub Actions
+
+`.github/workflows/app-ci.yml` triggers on pull requests that touch `app/**` or the workflow file itself. Three sequential jobs:
+
+| Job | What runs | Docker required |
+|---|---|---|
+| `lint` | `ruff check` + `ruff format --check` + `mypy --strict src/` | No |
+| `unit` | `pytest app/tests/unit` | No |
+| `integration` | `pytest app/tests/integration` with Postgres 16 + LocalStack 3 service containers | Service containers (no Docker-in-Docker) |
+
+The integration job passes `DATABASE_URL`, `AWS_ENDPOINT_URL`, and fake AWS credentials as environment variables; `conftest.py` picks up `DATABASE_URL` to bypass testcontainers.
+
+To reproduce CI checks locally:
+```bash
+cd app/
+ruff check . && ruff format --check . && mypy --strict src/
+pytest tests/unit -v
+pytest tests/integration -v   # uses testcontainers locally
+```
 
 ## Updating This File
 

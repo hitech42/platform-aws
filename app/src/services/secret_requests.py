@@ -28,7 +28,7 @@ def create_request(
     Raises:
         NotFoundError: if service_id does not exist.
         ValidationError: if generate_value is False.
-        ConflictError: if an active request for the same (service, logical_name, environment) exists.
+        ConflictError: if a request for the same (service, logical_name, environment) exists.
     """
     service_catalog.get_service(db, service_id)  # 404 if not found
 
@@ -47,7 +47,7 @@ def create_request(
     ).scalar_one_or_none()
     if existing is not None:
         raise ConflictError(
-            f"A secret request for '{body.logical_name}' in '{body.environment}' already exists for this service.",
+            f"A request for '{body.logical_name}' in '{body.environment}' already exists.",
             field="logical_name",
         )
 
@@ -74,10 +74,22 @@ def create_request(
     return request
 
 
-def get_request(db: Session, request_id: uuid.UUID) -> SecretRequest:
-    req = db.execute(
-        select(SecretRequest).where(SecretRequest.id == request_id)
-    ).scalar_one_or_none()
+def get_request(
+    db: Session,
+    request_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+) -> SecretRequest:
+    """Fetch a secret request by ID.
+
+    Pass for_update=True in the approve route to acquire a SELECT FOR UPDATE
+    row lock, preventing concurrent approvals from both reading PENDING and
+    both proceeding past the state-machine check.
+    """
+    q = select(SecretRequest).where(SecretRequest.id == request_id)
+    if for_update:
+        q = q.with_for_update()
+    req = db.execute(q).scalar_one_or_none()
     if req is None:
         raise NotFoundError(f"Secret request '{request_id}' not found.", field="request_id")
     return req
@@ -85,9 +97,16 @@ def get_request(db: Session, request_id: uuid.UUID) -> SecretRequest:
 
 def list_events(db: Session, request_id: uuid.UUID) -> list[RequestEvent]:
     get_request(db, request_id)  # 404 if request not found
-    rows = db.execute(
-        select(RequestEvent)
-        .where(RequestEvent.secret_request_id == request_id)
-        .order_by(RequestEvent.timestamp.asc())
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(RequestEvent)
+            .where(RequestEvent.secret_request_id == request_id)
+            # seq is a DB-generated monotonic counter; it is the correct tiebreaker
+            # when two events share the same timestamp (e.g. APPROVED + PROVISIONING
+            # written in the same transaction both receive now() = tx start time).
+            .order_by(RequestEvent.timestamp.asc(), RequestEvent.seq.asc())
+        )
+        .scalars()
+        .all()
+    )
     return list(rows)
