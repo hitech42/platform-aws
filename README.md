@@ -4,7 +4,13 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 
 ## Status
 
-**Early scaffold** — project structure, configuration, and tooling are in place. The `/healthz` and `/readyz` endpoints are functional. Database models, the secret-request lifecycle, and all business endpoints will be added in subsequent sessions.
+**Core API implemented.** The full secret-request lifecycle is operational:
+
+- Service catalog (register/list/get teams and services)
+- Secret-request lifecycle (`PENDING → APPROVED → PROVISIONING → PROVISIONED | FAILED`)
+- Immutable audit trail (one event row per state transition)
+- AWS Secrets Manager provisioning via `approve` endpoint
+- 99 tests passing (unit + integration via testcontainers)
 
 ## Prerequisites
 
@@ -87,12 +93,42 @@ curl -s http://localhost:8000/readyz | python3 -m json.tool
 # {"status": "ok"}
 ```
 
+## API Reference
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/healthz` | Liveness probe — always 200 |
+| `GET` | `/readyz` | Readiness probe — 200 if DB reachable, 503 otherwise |
+| `POST` | `/api/v1/services` | Register a service |
+| `GET` | `/api/v1/services` | List services (query params: `page`, `page_size`) |
+| `GET` | `/api/v1/services/{id}` | Get a service by ID |
+| `POST` | `/api/v1/services/{id}/secret-requests` | Create a secret request |
+| `GET` | `/api/v1/secret-requests/{id}` | Get a secret request |
+| `GET` | `/api/v1/secret-requests/{id}/events` | Audit trail for a request |
+| `POST` | `/api/v1/secret-requests/{id}/approve` | Approve and provision the secret |
+
+All error responses use the standard shape:
+```json
+{ "error": { "code": "NOT_FOUND", "message": "...", "field": "id" } }
+```
+
+Interactive docs (Swagger UI and ReDoc) are available at `/docs` and `/redoc` when the server is running.
+
 ## Running Tests
 
 ```bash
-# From the project root
-PYTHONPATH=. pytest app/tests/ -v
+# Unit tests only — fast, no Docker required
+.venv/bin/pytest app/tests/unit -v
+
+# Integration tests — requires Docker (testcontainers spins up Postgres automatically)
+.venv/bin/pytest app/tests/integration -v
+
+# Full suite
+.venv/bin/pytest app/tests -v
 ```
+
+> Secrets Manager calls are mocked in integration tests. To test against a real LocalStack
+> instance, start it with `docker compose up -d localstack` and set `AWS_ENDPOINT_URL=http://localhost:4566` in `.env`.
 
 ## Linting & Type Checking
 
