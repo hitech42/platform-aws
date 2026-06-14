@@ -70,3 +70,63 @@ The service layer and route structure do not change shape — only the DB and AW
 
 - **Thread pool overhead**: under very high concurrency, spinning up threads per request is less efficient than cooperative async I/O. Not a concern at current scale.
 - **Mixed sync/async risk**: if a future developer adds `async def` routes and inadvertently calls sync SQLAlchemy directly (without a thread pool), it will block the event loop silently. Code review must catch this if async routes are ever introduced.
+
+---
+
+## ADR-003: Row-level Locking for the Approve Endpoint
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+The `POST /secret-requests/{id}/approve` endpoint reads the current status, validates the transition, updates the row, and then calls Secrets Manager. Under concurrent requests (e.g., two approvers clicking "approve" at the same time), a naive read-then-write would result in a race: both requests could read `PENDING`, both pass the state check, and both call Secrets Manager — creating a duplicate secret and two `PROVISIONING` events.
+
+### Decision
+
+`secret_requests_svc.get_request` accepts an optional `for_update=True` parameter. When set, the SQLAlchemy query adds `.with_for_update()`, which emits `SELECT … FOR UPDATE`. This acquires a row-level exclusive lock for the duration of the transaction. The second concurrent request blocks at the lock and resumes after the first commits. At that point the row's status is `PROVISIONING`, the state machine rejects `PENDING → APPROVED`, and the route returns 409.
+
+### Rationale
+
+- **Correctness with minimal complexity**: `SELECT FOR UPDATE` is supported by all Postgres versions we target (14+) with no schema changes. The state machine then acts as a second safety net — even without the lock, a `PENDING → APPROVED` transition is only allowed once.
+- **No NOWAIT**: we deliberately omit `NOWAIT` so the second request blocks and waits for the first to commit rather than immediately failing. Approve operations are infrequent and human-initiated; the brief wait (milliseconds in practice) is preferable to a spurious error that forces the user to retry.
+- **No optimistic locking**: a version column would require an extra migration and client-side retry logic. Pessimistic locking on a single row is simpler and appropriate for a low-throughput internal tool.
+
+### Trade-offs
+
+- **Lock contention**: if the Secrets Manager call hangs, the lock is held for the duration. Acceptable because (1) approvals are rare, (2) Secrets Manager has its own timeout, and (3) a stuck approve is better than double-provisioning.
+- **Deadlock risk**: the approve route only ever locks one row at a time, so deadlock is not possible.
+
+---
+
+## ADR-004: Dual-mode Integration Tests (testcontainers vs GitHub Actions service containers)
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+Integration tests need a real Postgres database. Two approaches exist for providing one:
+
+1. **testcontainers**: the test suite spins up an ephemeral Docker container on demand. Works anywhere Docker is available; requires Docker-in-Docker or privileged mode in CI.
+2. **GitHub Actions service containers**: the workflow declares Postgres as a service container before the job steps run. Available immediately when steps start; no Docker-in-Docker needed; faster startup.
+
+### Decision
+
+Support both modes via a single `conftest.py` that branches on the `DATABASE_URL` environment variable:
+
+- **Local dev** (`DATABASE_URL` unset): `testcontainers` spins up `postgres:16-alpine`, scope `module` (fresh DB per test module for strong isolation).
+- **CI** (`DATABASE_URL` set by the workflow): the service container is used directly, scope `session` (migrations run once per suite since the container is already running and shared).
+
+The branch uses Python-level `if/else` at module load time so the fixture is defined with the correct scope before pytest collects tests.
+
+### Rationale
+
+- **Local dev requires zero setup**: contributors need only Docker; no local Postgres required.
+- **CI avoids Docker-in-Docker**: GitHub Actions service containers run as sibling containers, not nested Docker. This is simpler, faster, and more reliable than `testcontainers` inside a CI job.
+- **Single test file**: the same test files run in both modes with no conditional logic inside tests themselves.
+
+### Trade-offs
+
+- **Two scopes in the same codebase**: `module` vs `session` scope means isolation characteristics differ between local dev and CI. A test that leaks state across modules would pass locally but fail in CI (or vice versa). Mitigated by the rollback-after-each-test pattern in `db_session`.
+- **Environment variable coupling**: forgetting to set `DATABASE_URL` in a new CI job would silently fall back to testcontainers, which fails if Docker-in-Docker is not available. The workflow sets the variable explicitly to prevent this.
