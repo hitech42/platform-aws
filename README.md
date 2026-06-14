@@ -10,7 +10,8 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 - Secret-request lifecycle (`PENDING → APPROVED → PROVISIONING → PROVISIONED | FAILED`)
 - Immutable audit trail (one event row per state transition)
 - AWS Secrets Manager provisioning via `approve` endpoint
-- 99 tests passing (unit + integration via testcontainers)
+- 123 tests passing (unit + integration via testcontainers)
+- GitHub Actions CI on every PR (lint, unit, integration)
 
 ## Prerequisites
 
@@ -137,6 +138,22 @@ cd app/
 ruff check src/ tests/
 ruff format src/ tests/
 mypy src/
+```
+
+## CI
+
+GitHub Actions runs three jobs on every PR that touches `app/**`:
+
+1. **Lint & typecheck** — ruff + mypy
+2. **Unit tests** — fast, no Docker
+3. **Integration tests** — Postgres 16 and LocalStack 3 via service containers; testcontainers is bypassed in CI (the workflow sets `DATABASE_URL`)
+
+To reproduce CI locally from the repo root:
+```bash
+cd app/
+ruff check . && ruff format --check . && mypy --strict src/
+pytest tests/unit -v
+pytest tests/integration -v   # uses testcontainers; requires Docker
 ```
 
 ## IntelliJ / PyCharm
