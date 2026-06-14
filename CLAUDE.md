@@ -247,6 +247,107 @@ pytest tests/unit -v
 pytest tests/integration -v   # uses testcontainers locally
 ```
 
+## Infrastructure (Terraform)
+
+### Tool versions
+
+| Tool | Version |
+|---|---|
+| Terraform | ≥ 1.7 |
+| AWS provider | ~> 5.0 |
+
+### Module layout
+
+```
+infra/
+├── bootstrap/          ← one-time manual apply; local backend; state stored in repo
+│   ├── main.tf         ← S3 bucket + DynamoDB lock table
+│   ├── variables.tf
+│   └── outputs.tf
+├── modules/
+│   ├── network/        ← VPC, 4 subnets, IGW, security groups
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── tests/network.tftest.hcl
+│   └── iam/            ← GitHub OIDC provider, deploy role, ECS task role shells
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── tests/iam.tftest.hcl
+└── envs/
+    └── dev/            ← root module wiring network + iam
+        ├── backend.tf
+        ├── providers.tf
+        ├── main.tf
+        ├── variables.tf
+        ├── outputs.tf
+        ├── terraform.tfvars
+        └── tests/envs_dev.tftest.hcl
+```
+
+### Network topology
+
+Each environment gets **4 subnets across 2 AZs** (see ADR-005):
+
+| Subnet type | Count | Purpose | `map_public_ip_on_launch` |
+|---|---|---|---|
+| Public | 2 | ALB + ECS Fargate tasks | `true` |
+| Private | 2 | Aurora Serverless v2 | `false` |
+
+Internet isolation for Aurora is enforced by the **private route table** (no default route, no NAT Gateway). The `db` security group adds a defence-in-depth layer (port 5432 from `ecs_service_sg` only, no CIDR inbound).
+
+ECS tasks run in public subnets without a NAT Gateway: they get public IPs and reach ECR / Secrets Manager / CloudWatch via the IGW directly. This is the trade-off for dev cost savings; staging/prod should add a NAT Gateway and move ECS to private subnets.
+
+### IAM policy evolution
+
+The GitHub Actions deploy role (`{project_name}-{environment}-github-deploy`) is built incrementally across sessions:
+
+| Session | Permissions added |
+|---|---|
+| E1 (this session) | S3 + DynamoDB (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
+| E2 | ECS, ECR, ALB, Secrets Manager |
+| E3 | Aurora/RDS, KMS |
+| E4 | CloudWatch Logs/metrics |
+
+`ec2:Describe*` and VPC-mutate actions use `Resource: "*"` because EC2 does not support resource-level ARNs for Describe operations, and tag-based conditions require the resources to exist before the policy can reference them. Add tag-based conditions in staging/prod once VPC IDs are known (see TODO in `infra/modules/iam/main.tf`).
+
+### Terraform tests
+
+Tests live in a `tests/` subdirectory of the config they test (`terraform test` only discovers `.tftest.hcl` in the config directory or its `tests/` subdir).
+
+All tests use `mock_provider "aws" {}` — no real AWS credentials required.
+
+- **Network tests** (`command = plan`): fast; no resources are created.
+- **IAM tests** (`command = apply`): required because `assume_role_policy` embeds a computed OIDC provider ARN; the value is unknown at plan time even with a mock provider.
+- **Override `data.aws_availability_zones.available`**: every network test run must supply `override_data` with mock AZ names — the mock provider returns `null` for unset list attributes, which causes `element()` to panic.
+- **`coalesce(value, [])`**: wrap mock-provider list attributes that may be `null` (e.g., `cidr_blocks`, `ipv6_cidr_blocks` on security group rules) before calling `length()`.
+
+To run tests:
+
+```bash
+# Network module
+cd infra/modules/network
+terraform init -backend=false && terraform test
+
+# IAM module
+cd infra/modules/iam
+terraform init -backend=false && terraform test
+
+# envs/dev root module
+cd infra/envs/dev
+terraform init -backend=false && terraform test
+```
+
+### Terraform fmt and validate
+
+Before committing any Terraform changes:
+
+```bash
+terraform -chdir=infra fmt -recursive -check   # must be clean
+terraform -chdir=infra/envs/dev validate       # must succeed
+```
+
 ## Updating This File
 
 Update `CLAUDE.md` whenever a new convention is established, a technology version changes, or a new layer is added to the architecture. It should always reflect the current state of the project, not historical decisions (use `DECISIONS.md` for those).
