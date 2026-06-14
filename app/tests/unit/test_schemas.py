@@ -1,6 +1,7 @@
 """Unit tests for Pydantic schemas — no DB required."""
 
 import uuid
+from datetime import UTC
 
 import pytest
 from pydantic import ValidationError
@@ -39,7 +40,7 @@ class TestServiceRead:
             repo_url = None
             from datetime import datetime, timezone
 
-            created_at = datetime.now(timezone.utc)
+            created_at = datetime.now(UTC)
 
         read = ServiceRead.model_validate(FakeORM(), from_attributes=True)
         assert isinstance(read.id, uuid.UUID)

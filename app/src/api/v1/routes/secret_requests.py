@@ -11,7 +11,7 @@ appears under two different base paths:
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.src.db.session import get_db
@@ -21,9 +21,9 @@ from app.src.schemas.secret_request import (
     SecretRequestBody,
     SecretRequestRead,
 )
-from app.src.services import request_lifecycle, secret_requests as secret_requests_svc
+from app.src.services import request_lifecycle, service_catalog
+from app.src.services import secret_requests as secret_requests_svc
 from app.src.services import secrets_manager as secrets_manager_svc
-from app.src.services import service_catalog
 
 log = structlog.get_logger(__name__)
 
@@ -71,10 +71,15 @@ def list_events(
 def approve_secret_request(
     request_id: uuid.UUID,
     body: ApproveRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> SecretRequestRead:
     req = secret_requests_svc.get_request(db, request_id, for_update=True)
     service = service_catalog.get_service(db, req.service_id)
+
+    # Capture initial status for the request-log middleware (from_status/to_status
+    # are read by RequestLoggingMiddleware after this handler returns).
+    request.state.from_status = req.status
 
     # Validate state and move to PROVISIONING — commit so the state is durable
     # before the external AWS call begins.
@@ -94,12 +99,31 @@ def approve_secret_request(
         )
         req.secret_arn = arn
         request_lifecycle.transition(db, req, "PROVISIONED", actor="system", detail=arn)
-        log.info("secret_request.provisioned", request_id=str(req.id), arn=arn)
+        # ↓ CloudWatch Logs metric filter target — do not change event name or outcome field.
+        # Metric filter: { $.event = "secret_provisioning_outcome" && $.outcome = "provisioned" }
+        # drives the success counter; "failed" drives the failure-rate alarm.
+        log.info(
+            "secret_provisioning_outcome",
+            outcome="provisioned",
+            request_id=str(req.id),
+            service_id=str(req.service_id),
+            environment=req.environment,
+            arn=arn,
+        )
     except Exception as exc:
         detail = str(exc)[:2000]
         request_lifecycle.transition(db, req, "FAILED", actor="system", detail=detail)
-        log.warning("secret_request.provisioning_failed", request_id=str(req.id), error=detail)
+        # ↓ CloudWatch Logs metric filter target — see comment above.
+        log.warning(
+            "secret_provisioning_outcome",
+            outcome="failed",
+            request_id=str(req.id),
+            service_id=str(req.service_id),
+            environment=req.environment,
+            error=detail,
+        )
 
     db.commit()
     db.refresh(req)
+    request.state.to_status = req.status
     return SecretRequestRead.model_validate(req)

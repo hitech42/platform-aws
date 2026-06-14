@@ -42,9 +42,7 @@ def transition(
     """
     allowed = VALID_TRANSITIONS.get(request.status, frozenset())
     if new_status not in allowed:
-        raise InvalidStateError(
-            f"Cannot transition from '{request.status}' to '{new_status}'."
-        )
+        raise InvalidStateError(f"Cannot transition from '{request.status}' to '{new_status}'.")
 
     from_status = request.status
     request.status = new_status

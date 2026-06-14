@@ -11,8 +11,8 @@ Run just unit tests (no Docker required):
     pytest app/tests/unit
 """
 
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 from alembic import command
@@ -46,9 +46,7 @@ def db_engine(postgres_container: PostgresContainer) -> Engine:  # type: ignore[
     cfg.set_main_option("sqlalchemy.url", url)
     # Set an absolute script_location so Alembic resolves the migrations directory
     # correctly regardless of the working directory pytest was invoked from.
-    cfg.set_main_option(
-        "script_location", str(ALEMBIC_INI.parent / "src/db/migrations")
-    )
+    cfg.set_main_option("script_location", str(ALEMBIC_INI.parent / "src/db/migrations"))
     command.upgrade(cfg, "head")
 
     engine = create_engine(url, pool_pre_ping=True)

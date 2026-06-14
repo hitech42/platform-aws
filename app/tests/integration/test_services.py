@@ -18,10 +18,10 @@ def _make_client(db_engine: object) -> TestClient:
     from sqlalchemy import Engine
 
     assert isinstance(db_engine, Engine)
-    TestSession = sessionmaker(bind=db_engine)
+    session_factory = sessionmaker(bind=db_engine)
 
     def override_get_db() -> Session:  # type: ignore[misc]
-        db = TestSession()
+        db = session_factory()
         try:
             yield db  # type: ignore[misc]
         except Exception:
@@ -80,7 +80,9 @@ def test_create_service_duplicate_name_returns_409(db_engine: object) -> None:
     try:
         name = f"dup-{uuid.uuid4().hex[:8]}"
         client.post("/api/v1/services", json={"name": name, "team": "a", "owner_email": "a@a.com"})
-        r = client.post("/api/v1/services", json={"name": name, "team": "b", "owner_email": "b@b.com"})
+        r = client.post(
+            "/api/v1/services", json={"name": name, "team": "b", "owner_email": "b@b.com"}
+        )
         assert r.status_code == 409
         err = r.json()["error"]
         assert err["code"] == "CONFLICT"
@@ -106,10 +108,11 @@ def test_list_services_returns_paginated_response(db_engine: object) -> None:
     client = _make_client(db_engine)
     try:
         # Create two services to ensure at least something is returned.
-        for i in range(2):
+        for _ in range(2):
+            name = f"list-svc-{uuid.uuid4().hex[:6]}"
             client.post(
                 "/api/v1/services",
-                json={"name": f"list-svc-{uuid.uuid4().hex[:6]}", "team": "t", "owner_email": "t@t.com"},
+                json={"name": name, "team": "t", "owner_email": "t@t.com"},
             )
         r = client.get("/api/v1/services?page=1&page_size=50")
         assert r.status_code == 200
@@ -154,7 +157,10 @@ def test_list_services_pagination_offsets_correctly(db_engine: object) -> None:
     try:
         names = [f"pg-{uuid.uuid4().hex[:6]}" for _ in range(3)]
         for name in names:
-            client.post("/api/v1/services", json={"name": name, "team": "t", "owner_email": "t@t.com"})
+            client.post(
+                "/api/v1/services",
+                json={"name": name, "team": "t", "owner_email": "t@t.com"},
+            )
 
         r1 = client.get("/api/v1/services?page=1&page_size=1")
         r2 = client.get("/api/v1/services?page=2&page_size=1")

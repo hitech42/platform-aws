@@ -8,10 +8,8 @@ import threading
 import uuid
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -358,9 +356,7 @@ def test_approve_concurrent_calls_second_gets_409(client: TestClient) -> None:
         t1.join(timeout=30)
         t2.join(timeout=30)
 
-    assert sorted(results) == [200, 409], (
-        f"Expected exactly one 200 and one 409, got {results}"
-    )
+    assert sorted(results) == [200, 409], f"Expected exactly one 200 and one 409, got {results}"
 
 
 def test_approve_non_pending_request_returns_409(client: TestClient) -> None:

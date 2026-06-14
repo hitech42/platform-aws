@@ -1,9 +1,6 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column
-
 # sqlalchemy.Uuid (added in SA 2.0) is used over postgresql.UUID because:
 # - `native_uuid=True` (default) maps to the native PostgreSQL UUID type on Aurora,
 #   giving efficient storage and indexing without any extra configuration.
@@ -11,7 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 #   keeping the Python layer type-safe without manual conversion.
 # - The portable spelling avoids a dialect-specific import for a property that is
 #   effectively the same on every database we'll ever target.
-from sqlalchemy import Uuid
+from sqlalchemy import DateTime, String, UniqueConstraint, Uuid, text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.src.models.base import Base
 
@@ -32,6 +30,4 @@ class Service(Base):
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
 
-    __table_args__ = (
-        UniqueConstraint("name", name="uq_services_name"),
-    )
+    __table_args__ = (UniqueConstraint("name", name="uq_services_name"),)

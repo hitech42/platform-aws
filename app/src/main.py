@@ -12,6 +12,7 @@ from app.src.api.v1.routes.health import router as health_router
 from app.src.core.config import settings
 from app.src.core.exceptions import AppError
 from app.src.core.logging import configure_logging
+from app.src.core.middleware import RequestLoggingMiddleware
 
 log = structlog.get_logger(__name__)
 
@@ -32,7 +33,7 @@ def _error_body(code: str, message: str, field: str | None = None) -> dict:  # t
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Developer Self-Service Platform API",
-        description="Internal self-service platform for dev teams to manage secrets and platform resources.",
+        description="Internal self-service platform for dev teams to manage secrets and resources.",
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -79,6 +80,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Request logging: added last so it is the outermost middleware — it times the
+    # full request including CORS header injection.
+    app.add_middleware(RequestLoggingMiddleware)
 
     # ── Routers ────────────────────────────────────────────────────────────────
 

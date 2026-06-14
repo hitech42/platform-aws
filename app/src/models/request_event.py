@@ -1,8 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, text
-from sqlalchemy import Uuid
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.src.models.base import Base

@@ -17,7 +17,6 @@ from app.src.models.request_event import RequestEvent
 from app.src.models.secret_request import SecretRequest
 from app.src.models.service import Service
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -78,13 +77,9 @@ def test_insert_secret_request_defaults(db_session: Session) -> None:
 def test_unique_constraint_service_logical_env(db_session: Session) -> None:
     """The same (service_id, logical_name, environment) combination must be rejected."""
     svc = make_service(db_session)
-    make_secret_request(
-        db_session, svc, logical_name="db-password", environment="prod"
-    )
+    make_secret_request(db_session, svc, logical_name="db-password", environment="prod")
     with pytest.raises(IntegrityError):
-        make_secret_request(
-            db_session, svc, logical_name="db-password", environment="prod"
-        )
+        make_secret_request(db_session, svc, logical_name="db-password", environment="prod")
 
 
 def test_same_logical_name_different_env_allowed(db_session: Session) -> None:
@@ -133,10 +128,10 @@ def test_readyz_returns_200_when_db_reachable(db_engine: object) -> None:
     from sqlalchemy.orm import sessionmaker
 
     assert isinstance(db_engine, Engine)
-    TestSession = sessionmaker(bind=db_engine)
+    session_factory = sessionmaker(bind=db_engine)
 
     def override_get_db() -> Session:  # type: ignore[misc]
-        db = TestSession()
+        db = session_factory()
         try:
             yield db  # type: ignore[misc]
         finally:

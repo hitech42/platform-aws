@@ -52,9 +52,7 @@ def upgrade() -> None:
         sa.Column("service_id", sa.Uuid(), nullable=False),
         sa.Column("logical_name", sa.String(length=255), nullable=False),
         sa.Column("environment", sa.String(length=10), nullable=False),
-        sa.Column(
-            "status", sa.String(length=20), server_default="PENDING", nullable=False
-        ),
+        sa.Column("status", sa.String(length=20), server_default="PENDING", nullable=False),
         sa.Column("secret_arn", sa.String(length=2048), nullable=True),
         sa.Column("description", sa.String(length=1000), nullable=True),
         sa.Column(
@@ -110,9 +108,7 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["secret_request_id"], ["secret_requests.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["secret_request_id"], ["secret_requests.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -124,12 +120,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        op.f("ix_request_events_secret_request_id"), table_name="request_events"
-    )
+    op.drop_index(op.f("ix_request_events_secret_request_id"), table_name="request_events")
     op.drop_table("request_events")
-    op.drop_index(
-        op.f("ix_secret_requests_service_id"), table_name="secret_requests"
-    )
+    op.drop_index(op.f("ix_secret_requests_service_id"), table_name="secret_requests")
     op.drop_table("secret_requests")
     op.drop_table("services")

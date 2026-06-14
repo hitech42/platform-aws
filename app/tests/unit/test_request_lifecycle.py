@@ -55,10 +55,11 @@ def test_approved_to_provisioning_succeeds() -> None:
 def test_provisioning_to_provisioned_succeeds() -> None:
     db = _make_db()
     req = _make_request("PROVISIONING")
-    event = transition(db, req, "PROVISIONED", actor="system", detail="arn:aws:sm:us-east-1:123:secret:x")
+    arn = "arn:aws:sm:us-east-1:123:secret:x"
+    event = transition(db, req, "PROVISIONED", actor="system", detail=arn)
 
     assert req.status == "PROVISIONED"
-    assert event.detail == "arn:aws:sm:us-east-1:123:secret:x"
+    assert event.detail == arn
 
 
 def test_provisioning_to_failed_succeeds() -> None:
@@ -130,11 +131,13 @@ def test_terminal_failed_cannot_transition() -> None:
 
 def test_all_statuses_have_transition_entries() -> None:
     from app.src.models.secret_request import VALID_STATUSES
+
     assert set(VALID_TRANSITIONS.keys()) == set(VALID_STATUSES)
 
 
 def test_all_target_statuses_are_valid() -> None:
     from app.src.models.secret_request import VALID_STATUSES
+
     valid = set(VALID_STATUSES)
     for targets in VALID_TRANSITIONS.values():
         assert targets.issubset(valid)
