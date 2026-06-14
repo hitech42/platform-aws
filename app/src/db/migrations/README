@@ -1,0 +1,7 @@
+Generic single-database configuration with an environment-aware DATABASE_URL.
+Run migrations from the app/ directory:
+
+    cd app/
+    alembic upgrade head
+    alembic downgrade -1
+    alembic revision --autogenerate -m "describe change"
