@@ -52,3 +52,19 @@ app/src/db/migrations/versions/*.pyc
 *.swp
 *.swo
 .vscode/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+# Exception: bootstrap state is committed so bootstrap can't be re-run accidentally
+!infra/bootstrap/terraform.tfstate
+!infra/bootstrap/terraform.tfstate.backup
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
