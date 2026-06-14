@@ -160,6 +160,99 @@ pytest tests/integration -v   # uses testcontainers; requires Docker
 
 Mark `app/src/` as a **Sources Root** (right-click → Mark Directory as → Sources Root). Set the project root as a content root so `app.src.*` imports resolve correctly without needing to set `PYTHONPATH` manually.
 
+## Infrastructure Setup (Terraform)
+
+> **Prerequisite**: Terraform ≥ 1.7 installed. The AWS CLI must be configured with credentials that have enough permissions to create S3 buckets, DynamoDB tables, VPCs, and IAM roles.
+
+### Step 1 — Bootstrap remote state
+
+The bootstrap module creates the S3 bucket and DynamoDB table that all other Terraform state will use. It uses a **local backend** because the state bucket doesn't exist yet. Run it once per AWS account.
+
+```bash
+cd infra/bootstrap/
+
+terraform init
+terraform plan -var="project_name=cvs-platform"
+# Review the plan — it creates an S3 bucket and a DynamoDB table only.
+terraform apply -var="project_name=cvs-platform"
+```
+
+Note the two outputs — you'll need them in the next step:
+
+```
+state_bucket_name     = "cvs-platform-tfstate-<account-id>"
+state_lock_table_name = "cvs-platform-tfstate-lock"
+```
+
+Commit the generated `infra/bootstrap/terraform.tfstate` — it is intentionally not gitignored.
+
+### Step 2 — Fill in backend.tf and terraform.tfvars
+
+Edit `infra/envs/dev/backend.tf` and replace the placeholder strings with the bootstrap outputs:
+
+```hcl
+bucket         = "cvs-platform-tfstate-<account-id>"
+dynamodb_table = "cvs-platform-tfstate-lock"
+```
+
+Edit `infra/envs/dev/terraform.tfvars` and replace the `REPLACE_WITH_*` placeholders:
+
+```hcl
+github_org            = "your-org"
+github_repo           = "your-repo"
+state_bucket_name     = "cvs-platform-tfstate-<account-id>"
+state_lock_table_name = "cvs-platform-tfstate-lock"
+```
+
+If the GitHub OIDC provider already exists in this account (from another project), set `create_oidc_provider = false`.
+
+### Step 3 — Init and plan envs/dev
+
+```bash
+cd infra/envs/dev/
+
+terraform init   # downloads providers, configures S3 backend
+terraform plan
+```
+
+**What to look for in the plan output:**
+
+- `Plan: N to add, 0 to change, 0 to destroy` — no unexpected destroys.
+- Resources created should include: `aws_vpc`, 2× `aws_subnet` (public), 2× `aws_subnet` (private), `aws_internet_gateway`, 2× `aws_route_table`, 4× `aws_route_table_association`, 3× `aws_security_group`, `aws_iam_openid_connect_provider` (if `create_oidc_provider = true`), 3× `aws_iam_role`, 1× `aws_iam_role_policy`.
+- No resources touching ECS, Aurora, ALB, or CloudWatch — those come in later sessions.
+
+### Step 4 — Apply (manual, after reviewing the plan)
+
+```bash
+terraform apply
+```
+
+After apply, note the outputs — you'll wire them into the CI workflow (E2) and Aurora config (E3):
+
+```
+vpc_id                     = "vpc-..."
+public_subnet_ids          = ["subnet-...", "subnet-..."]
+private_subnet_ids         = ["subnet-...", "subnet-..."]
+alb_sg_id                  = "sg-..."
+ecs_service_sg_id          = "sg-..."
+db_sg_id                   = "sg-..."
+github_actions_role_arn    = "arn:aws:iam::...:role/cvs-platform-dev-github-deploy"
+ecs_task_execution_role_arn = "arn:aws:iam::...:role/cvs-platform-dev-ecs-task-execution"
+ecs_task_role_arn           = "arn:aws:iam::...:role/cvs-platform-dev-ecs-task"
+```
+
+### Running Terraform tests (no AWS credentials needed)
+
+```bash
+cd infra/modules/network && terraform init -backend=false && terraform test
+cd infra/modules/iam    && terraform init -backend=false && terraform test
+cd infra/envs/dev       && terraform init -backend=false && terraform test
+```
+
+All tests use `mock_provider "aws" {}`.
+
+---
+
 ## Docker (optional)
 
 ```bash

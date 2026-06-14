@@ -130,3 +130,95 @@ The branch uses Python-level `if/else` at module load time so the fixture is def
 
 - **Two scopes in the same codebase**: `module` vs `session` scope means isolation characteristics differ between local dev and CI. A test that leaks state across modules would pass locally but fail in CI (or vice versa). Mitigated by the rollback-after-each-test pattern in `db_session`.
 - **Environment variable coupling**: forgetting to set `DATABASE_URL` in a new CI job would silently fall back to testcontainers, which fails if Docker-in-Docker is not available. The workflow sets the variable explicitly to prevent this.
+
+---
+
+## ADR-005: 4-Subnet Network Topology (2 Public + 2 Private)
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+Each environment needs subnets for at least three tiers: load balancer (public), compute (ECS Fargate), and database (Aurora). The question is how many subnets to provision and which tiers share them.
+
+Two layouts were considered:
+
+1. **2 public subnets only**: ALB, ECS tasks, and Aurora all in the same public subnets. Simpler and cheaper; security group rules still restrict DB access. Unsuitable because Aurora Serverless v2 requires two private subnets (it will not launch in public subnets in a multi-AZ config).
+2. **4 subnets (2 public + 2 private), no NAT Gateway**: public subnets for ALB + ECS, private subnets for Aurora. ECS tasks get public IPs and egress via the IGW directly.
+
+### Decision
+
+Use **4 subnets (2 public + 2 private) across 2 AZs**. No NAT Gateway in dev.
+
+### Rationale
+
+- **Aurora placement**: Aurora Serverless v2 requires at least two subnets in different AZs. The subnets must be in a DB subnet group; keeping them private (no default route) is the standard pattern.
+- **Cost**: A NAT Gateway costs ~$32/month plus data-transfer fees. For a dev environment with low traffic, this is eliminated by running ECS tasks in public subnets with public IPs. ECS tasks can reach ECR, Secrets Manager, and CloudWatch via the IGW.
+- **Security**: Aurora is isolated in private subnets whose route table has no default route (no internet egress, no internet ingress path). The `db_sg` security group adds port 5432 from `ecs_service_sg` only as a second layer.
+- **High availability**: 2 AZs is sufficient for dev. The module uses `data.aws_availability_zones.available` to select AZs dynamically rather than hardcoding region-specific names.
+
+### Trade-offs
+
+- **ECS tasks have public IPs**: any security group misconfiguration that opens inbound ports would expose ECS tasks directly. Mitigated by `ecs_service_sg` (inbound from `alb_sg` only on the app port). Staging and prod should add a NAT Gateway and place ECS tasks in private subnets.
+- **Aurora egress**: Aurora in private subnets with no NAT cannot reach the internet. This is intentional — RDS/Aurora does not need internet egress. IAM auth tokens are generated client-side.
+
+### Migration to NAT Gateway (for staging/prod)
+
+Add `aws_eip` + `aws_nat_gateway` in a public subnet, add a default route `0.0.0.0/0 → NAT` to the private route table, and move ECS task subnets to private. ECS tasks no longer need `map_public_ip_on_launch = true`.
+
+---
+
+## ADR-006: HTTP-only ALB in Dev (no HTTPS)
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+Production and staging ALBs must use HTTPS (TLS termination at the ALB). Setting up HTTPS requires a domain name registered in Route 53 and an ACM certificate validated against it. For a dev environment that is accessed only via the ALB DNS name or internal tooling, this is unnecessary ceremony.
+
+### Decision
+
+The `alb_sg` security group in the network module opens **port 80 (HTTP) only** in dev. HTTPS (port 443) is not opened and no ACM certificate is provisioned.
+
+### Rationale
+
+- **No domain name yet**: the dev environment has no Route 53 hosted zone. ACM certificate validation via DNS requires a hosted zone to exist. Provisioning one adds cost and complexity that is not justified before the service is functional.
+- **Internal use only**: dev is accessed by engineers running tests or demos, not by end users or external systems. HTTP is acceptable in this context.
+- **Deferred, not permanent**: HTTPS is the right target for staging/prod. The `alb_sg` module variable `alb_ingress_port` (to be added in E2 with the actual ALB resource) will accept 443 in staging/prod.
+
+### Trade-offs
+
+- **Plaintext traffic**: credentials or tokens in HTTP request/response bodies are transmitted unencrypted. Acceptable in dev because traffic stays within the VPC or developer's machine; mitigated by not routing dev through the public internet for sensitive operations.
+- **Behaviour gap**: the dev environment does not perfectly mirror staging/prod. Any bug related to TLS termination, HTTPS redirects, or certificate validation would not surface in dev.
+
+---
+
+## ADR-007: SSE-S3 Encryption for Bootstrap State Bucket
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+The Terraform state S3 bucket must be encrypted at rest. Two AWS-native options are available:
+
+1. **SSE-S3**: encryption keys managed entirely by S3. No additional cost; no key management overhead.
+2. **SSE-KMS**: encryption keys managed in AWS KMS. Enables key rotation, key policy auditing, and cross-account access patterns. Costs ~$1/month per CMK plus per-request fees.
+
+### Decision
+
+Use **SSE-S3** (`AES256`) for the bootstrap state bucket.
+
+### Rationale
+
+- **No application KMS key exists yet**: creating a dedicated KMS CMK for Terraform state would be a separate bootstrapping step. The CMK itself would then need its own state, creating a circular dependency.
+- **IAM already controls access**: the S3 bucket has `block_public_access` enabled and access is controlled entirely by IAM policies (only the GitHub Actions deploy role and the human operator have access). SSE-S3 satisfies the encryption-at-rest requirement without adding a second access-control layer.
+- **No independent security benefit**: SSE-KMS adds value when the KMS key policy is used to grant access separately from the S3 bucket policy (e.g., cross-account, or when IAM is not sufficient). Neither scenario applies here.
+- **Upgrade path**: S3 allows switching the default encryption from SSE-S3 to SSE-KMS at any time without object migration — new objects use the new default; existing objects are re-encrypted on next write.
+
+### Trade-offs
+
+- **No KMS audit trail**: CloudTrail does not record SSE-S3 key use (there are no KMS API calls). SSE-KMS would provide per-request audit visibility. Accepted — S3 access logs and CloudTrail S3 data events are sufficient for this use case.
+- **No key rotation control**: SSE-S3 key rotation is managed by AWS and is not configurable. SSE-KMS CMKs can be rotated on a custom schedule. Accepted at this stage.

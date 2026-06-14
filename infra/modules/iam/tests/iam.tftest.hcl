@@ -44,7 +44,7 @@ run "github_role_trust_policy" {
   # The aud condition must be sts.amazonaws.com — required by AWS for OIDC
   # token exchange via GitHub Actions.
   assert {
-    condition = jsondecode(aws_iam_role.github_deploy.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
+    condition     = jsondecode(aws_iam_role.github_deploy.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
     error_message = "OIDC trust aud condition must be 'sts.amazonaws.com'."
   }
 
@@ -114,12 +114,12 @@ run "ecs_roles_trust_ecs_tasks_only" {
   command = apply
 
   assert {
-    condition = jsondecode(aws_iam_role.ecs_task_execution.assume_role_policy).Statement[0].Principal.Service == "ecs-tasks.amazonaws.com"
+    condition     = jsondecode(aws_iam_role.ecs_task_execution.assume_role_policy).Statement[0].Principal.Service == "ecs-tasks.amazonaws.com"
     error_message = "ECS task execution role trust policy must allow only ecs-tasks.amazonaws.com."
   }
 
   assert {
-    condition = jsondecode(aws_iam_role.ecs_task.assume_role_policy).Statement[0].Principal.Service == "ecs-tasks.amazonaws.com"
+    condition     = jsondecode(aws_iam_role.ecs_task.assume_role_policy).Statement[0].Principal.Service == "ecs-tasks.amazonaws.com"
     error_message = "ECS task role trust policy must allow only ecs-tasks.amazonaws.com."
   }
 }
