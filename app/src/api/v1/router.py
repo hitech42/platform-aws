@@ -1,7 +1,10 @@
 from fastapi import APIRouter
 
-v1_router = APIRouter()
+from app.src.api.v1.routes.services import router as services_router
 
-# Future route modules are included here, e.g.:
-# from app.src.api.v1.routes.secrets import router as secrets_router
-# v1_router.include_router(secrets_router, prefix="/secrets", tags=["secrets"])
+v1_router = APIRouter()
+v1_router.include_router(services_router)
+
+# Future routers added here:
+# from app.src.api.v1.routes.secret_requests import router as secret_requests_router
+# v1_router.include_router(secret_requests_router)
