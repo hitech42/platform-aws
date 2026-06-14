@@ -67,6 +67,20 @@ def db_session(db_engine: Engine) -> Session:  # type: ignore[misc]
 
 
 @pytest.fixture
+def committed_db(db_engine: Engine) -> Generator[Session, None, None]:  # type: ignore[misc]
+    """Session for direct DB setup that commits immediately (no rollback on teardown).
+
+    Use this when a test needs to insert raw rows that the `client` fixture's
+    separate session must be able to see — e.g. a SecretRequest without any
+    RequestEvents, which cannot be created via the normal API flow.
+    """
+    factory = sessionmaker(bind=db_engine)
+    session = factory()
+    yield session
+    session.close()
+
+
+@pytest.fixture
 def client(db_engine: Engine) -> Generator[TestClient, None, None]:  # type: ignore[misc]
     """TestClient with get_db overridden to use the testcontainers Postgres engine."""
     from app.src.db.session import get_db

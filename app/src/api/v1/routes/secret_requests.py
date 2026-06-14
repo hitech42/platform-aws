@@ -73,7 +73,7 @@ def approve_secret_request(
     body: ApproveRequest,
     db: Session = Depends(get_db),
 ) -> SecretRequestRead:
-    req = secret_requests_svc.get_request(db, request_id)
+    req = secret_requests_svc.get_request(db, request_id, for_update=True)
     service = service_catalog.get_service(db, req.service_id)
 
     # Validate state and move to PROVISIONING — commit so the state is durable

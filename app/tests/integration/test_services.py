@@ -132,6 +132,23 @@ def test_list_services_page_size_capped_at_100(db_engine: object) -> None:
         app.dependency_overrides.clear()
 
 
+def test_list_services_page_beyond_data_returns_empty_items(db_engine: object) -> None:
+    # page_size > 100 is rejected (422) — see test_list_services_page_size_capped_at_100.
+    # page beyond the last row of data is NOT an error: it returns items=[] and the
+    # true total so callers can detect they've read past the end.
+    client = _make_client(db_engine)
+    try:
+        r = client.get("/api/v1/services?page=99999&page_size=100")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["items"] == []
+        assert body["page"] == 99999
+        assert body["page_size"] == 100
+        assert isinstance(body["total"], int)
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_list_services_pagination_offsets_correctly(db_engine: object) -> None:
     client = _make_client(db_engine)
     try:
