@@ -12,10 +12,12 @@ Run just unit tests (no Docker required):
 """
 
 from pathlib import Path
+from typing import Generator
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -62,3 +64,27 @@ def db_session(db_engine: Engine) -> Session:  # type: ignore[misc]
     yield session
     session.rollback()
     session.close()
+
+
+@pytest.fixture
+def client(db_engine: Engine) -> Generator[TestClient, None, None]:  # type: ignore[misc]
+    """TestClient with get_db overridden to use the testcontainers Postgres engine."""
+    from app.src.db.session import get_db
+    from app.src.main import app as fastapi_app
+
+    factory = sessionmaker(bind=db_engine)
+
+    def override_get_db() -> Generator[Session, None, None]:
+        db = factory()
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    fastapi_app.dependency_overrides[get_db] = override_get_db
+    with TestClient(fastapi_app) as c:
+        yield c
+    fastapi_app.dependency_overrides.clear()
