@@ -14,7 +14,9 @@ def get_connect_args() -> dict:  # type: ignore[type-arg]
         # The engine must also be created without connection pooling (pool_size=0)
         # because tokens expire after 15 minutes.
         raise NotImplementedError("IAM DB auth is not yet implemented")
-    return {}
+    # connect_timeout: seconds to wait for TCP connection — prevents health checks
+    # from hanging indefinitely when Postgres is unreachable.
+    return {"connect_timeout": 5}
 
 
 engine = create_engine(
@@ -31,5 +33,8 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
