@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,8 @@ from app.src.api.v1.routes.health import router as health_router
 from app.src.core.config import settings
 from app.src.core.exceptions import AppError
 from app.src.core.logging import configure_logging
+
+log = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -56,6 +59,14 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=422,
             content=_error_body("VALIDATION_ERROR", message, field or None),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        log.exception("unhandled_exception", exc_info=exc)
+        return JSONResponse(
+            status_code=500,
+            content=_error_body("INTERNAL_ERROR", "An unexpected error occurred."),
         )
 
     # ── Middleware ─────────────────────────────────────────────────────────────

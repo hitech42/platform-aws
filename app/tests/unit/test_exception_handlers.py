@@ -44,6 +44,11 @@ async def _body_validation(payload: dict) -> None:  # type: ignore[type-arg]
     pass
 
 
+@_test_router.get("/unhandled")
+async def _raise_unhandled() -> None:
+    raise RuntimeError("something completely unexpected")
+
+
 app.include_router(_test_router)
 client = TestClient(app)
 
@@ -132,3 +137,18 @@ def test_pydantic_request_validation_uses_standard_shape() -> None:
     body = r.json()
     assert "error" in body
     assert body["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_unhandled_exception_returns_500_with_standard_shape() -> None:
+    """Any unhandled exception should produce our standard error shape, not FastAPI's default."""
+    # raise_server_exceptions=False tells TestClient to let the exception handlers run
+    # instead of re-raising the exception in the test process.
+    no_raise_client = TestClient(app, raise_server_exceptions=False)
+    r = no_raise_client.get("/_test/unhandled")
+    assert r.status_code == 500
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "INTERNAL_ERROR"
+    # Internal error details must not leak to the caller
+    assert "RuntimeError" not in body["error"]["message"]
+    assert "something completely unexpected" not in body["error"]["message"]
