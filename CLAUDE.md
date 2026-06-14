@@ -81,6 +81,46 @@ This service lets internal dev teams self-serve platform requests without openin
 - IAM: least-privilege only — no `"*"` actions or resources in Terraform policies.
 - `DB_AUTH_MODE=iam` is the target for AWS deployments (RDS IAM auth via token). The `get_connect_args()` stub in `db/session.py` is the extension point.
 
+## Data Layer
+
+### Tables
+
+| Table | Purpose |
+|---|---|
+| `services` | Catalog of registered internal services/teams |
+| `secret_requests` | One row per request to provision a secret; tracks current status |
+| `request_events` | Immutable audit log — one row per status transition |
+
+### `secret_requests.status` lifecycle
+
+```
+PENDING → APPROVED → PROVISIONING → PROVISIONED
+                                  ↘ FAILED
+```
+
+Valid values (enforced by CHECK constraint): `PENDING`, `APPROVED`, `PROVISIONING`, `PROVISIONED`, `FAILED`.
+
+### `secret_requests.environment`
+
+Valid values (enforced by CHECK constraint): `dev`, `staging`, `prod`.  
+Stored as `VARCHAR` with a CHECK constraint (not a PostgreSQL native ENUM type) so adding a new environment only requires `ALTER TABLE ... ADD CHECK / DROP CONSTRAINT`, avoiding the un-transactable `ALTER TYPE ... ADD VALUE` that native ENUMs require.
+
+### UUID strategy
+
+All primary keys use `sqlalchemy.Uuid` (SQLAlchemy 2.x portable type, resolves to native `UUID` on PostgreSQL/Aurora). Python-side `default=uuid.uuid4` generates the UUID at `session.flush()` time; `server_default=gen_random_uuid()` is a DDL fallback for raw-SQL inserts. **The UUID is `None` until the object is flushed** — this is expected SQLAlchemy column-default behaviour, not a bug.
+
+### Integration test approach
+
+Integration tests use `testcontainers[postgres]` to spin up an ephemeral Postgres container and run Alembic migrations against it. They are self-contained (no locally-running Postgres needed) and can run in any environment with Docker.
+
+```bash
+pytest app/tests/unit          # fast, no Docker
+pytest app/tests/integration   # requires Docker
+pytest app/tests               # both
+```
+
+The `conftest.py` in `app/tests/integration/` sets `script_location` to an absolute path so the tests work regardless of pytest invocation CWD.
+
 ## Updating This File
 
 Update `CLAUDE.md` whenever a new convention is established, a technology version changes, or a new layer is added to the architecture. It should always reflect the current state of the project, not historical decisions (use `DECISIONS.md` for those).

@@ -11,18 +11,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.src.core.config import settings  # noqa: E402
+from app.src.models import Base  # noqa: E402  — imports all models so metadata is populated
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override the placeholder URL in alembic.ini with the value from app settings.
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Override the placeholder URL with the value from app settings, but only if the
+# caller has not already set a real URL (e.g. the integration test harness sets the
+# testcontainers URL via cfg.set_main_option() before calling command.upgrade()).
+_configured_url = config.get_main_option("sqlalchemy.url")
+if not _configured_url or _configured_url == "driver://placeholder/placeholder":
+    config.set_main_option("sqlalchemy.url", settings.database_url)
 
-# target_metadata will point to Base.metadata once models exist.
-# from app.src.models import Base  # uncomment in the next session
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

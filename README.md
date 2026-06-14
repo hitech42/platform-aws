@@ -55,12 +55,15 @@ docker compose ps
 
 ### 6. Run database migrations
 
-> **Note**: No migrations exist yet in this scaffold. The command below will be the standard workflow once models are added.
-
 ```bash
 cd app/
 alembic upgrade head
 cd ..
+```
+
+To roll back all migrations:
+```bash
+cd app/ && alembic downgrade base && cd ..
 ```
 
 ### 7. Run the application
