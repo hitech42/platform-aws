@@ -19,6 +19,5 @@ create_oidc_provider = true
 allowed_refs = ["refs/heads/develop"]
 
 # From bootstrap outputs — fill in after running `terraform apply` in infra/bootstrap/.
-# These must also be copied into backend.tf (backend config does not support variables).
-state_bucket_name     = "cvs-platform-tfstate-874505351468"
-state_lock_table_name = "cvs-platform-tfstate-lock"
+# Must also be copied into backend.tf (backend config does not support variables).
+state_bucket_name = "cvs-platform-tfstate-874505351468"

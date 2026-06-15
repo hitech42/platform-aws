@@ -16,13 +16,12 @@
 mock_provider "aws" {}
 
 variables {
-  project_name          = "test"
-  environment           = "dev"
-  github_org            = "myorg"
-  github_repo           = "myrepo"
-  state_bucket_name     = "test-tfstate-123456789"
-  state_lock_table_name = "test-tfstate-lock"
-  create_oidc_provider  = true
+  project_name         = "test"
+  environment          = "dev"
+  github_org           = "myorg"
+  github_repo          = "myrepo"
+  state_bucket_name    = "test-tfstate-123456789"
+  create_oidc_provider = true
   # allowed_refs uses module default: ["refs/heads/develop"]
 }
 

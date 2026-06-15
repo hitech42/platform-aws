@@ -10,12 +10,11 @@ run "invalid_environment_rejected" {
   command = plan
 
   variables {
-    project_name          = "test"
-    environment           = "production" # not in ["dev", "staging", "prod"]
-    github_org            = "myorg"
-    github_repo           = "myrepo"
-    state_bucket_name     = "test-tfstate-123456789"
-    state_lock_table_name = "test-tfstate-lock"
+    project_name      = "test"
+    environment       = "production" # not in ["dev", "staging", "prod"]
+    github_org        = "myorg"
+    github_repo       = "myrepo"
+    state_bucket_name = "test-tfstate-123456789"
   }
 
   # Variable validation runs before any module is instantiated, so no data
@@ -27,12 +26,11 @@ run "valid_environment_accepted" {
   command = apply # module.iam.github_actions_role_arn is a computed value, unknown at plan time
 
   variables {
-    project_name          = "test"
-    environment           = "dev"
-    github_org            = "myorg"
-    github_repo           = "myrepo"
-    state_bucket_name     = "test-tfstate-123456789"
-    state_lock_table_name = "test-tfstate-lock"
+    project_name      = "test"
+    environment       = "dev"
+    github_org        = "myorg"
+    github_repo       = "myrepo"
+    state_bucket_name = "test-tfstate-123456789"
   }
 
   override_data {

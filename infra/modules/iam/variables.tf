@@ -80,7 +80,3 @@ variable "state_bucket_name" {
   type        = string
 }
 
-variable "state_lock_table_name" {
-  description = "Name of the DynamoDB state-lock table (from bootstrap outputs). Used to scope the deploy role's DynamoDB permissions."
-  type        = string
-}

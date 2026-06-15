@@ -47,17 +47,12 @@ variable "allowed_refs" {
 
 # ── Bootstrap outputs ─────────────────────────────────────────────────────────
 #
-# These must match the values in backend.tf — Terraform cannot read its own
-# backend config as a variable, so the bucket/table names are declared here
-# separately to scope the IAM deploy-role policy.
+# Must match the value in backend.tf — Terraform cannot read its own backend
+# config as a variable, so the bucket name is declared here separately to
+# scope the IAM deploy-role S3 policy.
 
 variable "state_bucket_name" {
   description = "Name of the S3 state bucket (from bootstrap output state_bucket_name)."
-  type        = string
-}
-
-variable "state_lock_table_name" {
-  description = "Name of the DynamoDB lock table (from bootstrap output state_lock_table_name)."
   type        = string
 }
 
