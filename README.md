@@ -188,20 +188,20 @@ Commit the generated `infra/bootstrap/terraform.tfstate` — it is intentionally
 
 ### Step 2 — Fill in backend.tf and terraform.tfvars
 
-Edit `infra/envs/dev/backend.tf` and replace the placeholder strings with the bootstrap outputs:
+Edit `infra/envs/dev/backend.tf` and replace the placeholder with the bootstrap output:
 
 ```hcl
-bucket         = "cvs-platform-tfstate-<account-id>"
-dynamodb_table = "cvs-platform-tfstate-lock"
+bucket = "cvs-platform-tfstate-<account-id>"
 ```
+
+State locking uses S3 native locking (`use_lockfile = true`) — no DynamoDB entry needed here.
 
 Edit `infra/envs/dev/terraform.tfvars` and replace the `REPLACE_WITH_*` placeholders:
 
 ```hcl
-github_org            = "your-org"
-github_repo           = "your-repo"
-state_bucket_name     = "cvs-platform-tfstate-<account-id>"
-state_lock_table_name = "cvs-platform-tfstate-lock"
+github_org        = "your-org"
+github_repo       = "your-repo"
+state_bucket_name = "cvs-platform-tfstate-<account-id>"
 ```
 
 If the GitHub OIDC provider already exists in this account (from another project), set `create_oidc_provider = false`.

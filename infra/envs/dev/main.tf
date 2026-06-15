@@ -13,13 +13,12 @@ module "network" {
 module "iam" {
   source = "../../modules/iam"
 
-  project_name          = var.project_name
-  environment           = var.environment
-  github_org            = var.github_org
-  github_repo           = var.github_repo
-  create_oidc_provider  = var.create_oidc_provider
-  allowed_refs          = var.allowed_refs
-  state_bucket_name     = var.state_bucket_name
-  state_lock_table_name = var.state_lock_table_name
+  project_name         = var.project_name
+  environment          = var.environment
+  github_org           = var.github_org
+  github_repo          = var.github_repo
+  create_oidc_provider = var.create_oidc_provider
+  allowed_refs         = var.allowed_refs
+  state_bucket_name    = var.state_bucket_name
   # oidc_thumbprints uses module default (known GitHub OIDC cert thumbprints)
 }

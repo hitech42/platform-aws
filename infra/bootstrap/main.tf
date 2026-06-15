@@ -1,13 +1,16 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # BOOTSTRAP — run once, manually, before any other Terraform in this repo.
 #
-# This module creates the S3 bucket and DynamoDB table that all other
-# Terraform root modules (envs/dev, envs/staging, etc.) use as their remote
-# state backend.  It cannot itself use a remote backend (chicken-and-egg), so
-# state for this module is stored locally.  After applying:
+# This module creates the S3 bucket that all other Terraform root modules
+# (envs/dev, envs/staging, etc.) use as their remote state backend.
+# State locking uses S3 native locking (use_lockfile = true, Terraform ≥ 1.10)
+# — no DynamoDB table is needed.
 #
-#   1. Note the outputs (state_bucket_name, state_lock_table_name).
-#   2. Copy them into infra/envs/dev/backend.tf (and later staging/prod).
+# It cannot itself use a remote backend (chicken-and-egg), so state for this
+# module is stored locally.  After applying:
+#
+#   1. Note the output (state_bucket_name).
+#   2. Copy it into infra/envs/dev/backend.tf (and later staging/prod).
 #   3. Run `terraform init` inside each env directory to migrate state there.
 #
 # Commands (run from infra/bootstrap/):
@@ -19,7 +22,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 terraform {
-  required_version = ">= 1.7"
+  required_version = ">= 1.10"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -95,24 +98,3 @@ resource "aws_s3_bucket_public_access_block" "tfstate" {
   restrict_public_buckets = true
 }
 
-# ── DynamoDB state-lock table ─────────────────────────────────────────────────
-
-resource "aws_dynamodb_table" "tfstate_lock" {
-  name         = "${var.project_name}-tfstate-lock"
-  billing_mode = "PAY_PER_REQUEST" # On-demand: lock table is tiny, no provisioned waste.
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-
-  tags = {
-    Name      = "${var.project_name}-tfstate-lock"
-    ManagedBy = "terraform-bootstrap"
-  }
-}

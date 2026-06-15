@@ -108,18 +108,6 @@ resource "aws_iam_role_policy" "github_deploy" {
         Action   = ["s3:ListBucket", "s3:GetBucketVersioning"]
         Resource = "arn:aws:s3:::${var.state_bucket_name}"
       },
-      {
-        Sid    = "StateBackendLock"
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:DeleteItem",
-          "dynamodb:DescribeTable",
-        ]
-        Resource = "arn:aws:dynamodb:*:*:table/${var.state_lock_table_name}"
-      },
-
       # ── 2. EC2 read-only (Describe / List) ────────────────────────────────
       #
       # AWS requires Resource="*" for Describe* actions — these are account-level
