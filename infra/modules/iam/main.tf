@@ -215,33 +215,156 @@ resource "aws_iam_role_policy" "github_deploy" {
           "iam:AttachRolePolicy",
           "iam:DetachRolePolicy",
           "iam:ListAttachedRolePolicies",
-          # PassRole is needed in E2/E3 when Terraform registers the ECS task
-          # definition and passes the task execution / task roles to ECS.
-          # Granted now so the role's scope is consistent even before ECS exists.
+          # PassRole needed when Terraform registers ECS task definitions and
+          # passes the task execution / task roles to the ECS service (E3).
           "iam:PassRole",
         ]
         Resource = "arn:aws:iam::*:role/${var.project_name}-*"
       },
 
-      # TODO (E2): add the following to this policy when wiring up ECS + ECR:
-      #   ecs:*, ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability,
-      #   ecr:GetDownloadUrlForLayer, ecr:BatchGetImage, ecr:DescribeRepositories,
-      #   ecr:CreateRepository, ecr:DeleteRepository, ecr:TagResource,
+      # ── 5. RDS — Aurora cluster, instance, and subnet group ───────────────
+      #
+      # Mutating actions are scoped to project-prefixed resource ARNs.
+      # Describe/List actions use Resource="*" — AWS does not support resource-
+      # level ARNs for most Describe operations (they are account-wide list calls).
+      {
+        Sid    = "RDSManage"
+        Effect = "Allow"
+        Action = [
+          # Cluster lifecycle
+          "rds:CreateDBCluster",
+          "rds:DeleteDBCluster",
+          "rds:ModifyDBCluster",
+          "rds:StartDBCluster",
+          "rds:StopDBCluster",
+          "rds:RestoreDBClusterFromSnapshot",
+          # Instance lifecycle
+          "rds:CreateDBInstance",
+          "rds:DeleteDBInstance",
+          "rds:ModifyDBInstance",
+          "rds:RebootDBInstance",
+          # Subnet group
+          "rds:CreateDBSubnetGroup",
+          "rds:DeleteDBSubnetGroup",
+          "rds:ModifyDBSubnetGroup",
+          # Snapshots
+          "rds:CreateDBClusterSnapshot",
+          "rds:DeleteDBClusterSnapshot",
+          "rds:CopyDBClusterSnapshot",
+          # Tags
+          "rds:AddTagsToResource",
+          "rds:RemoveTagsFromResource",
+          "rds:ListTagsForResource",
+        ]
+        Resource = [
+          "arn:aws:rds:*:*:cluster:${var.project_name}-*",
+          "arn:aws:rds:*:*:db:${var.project_name}-*",
+          "arn:aws:rds:*:*:subgrp:${var.project_name}-*",
+          "arn:aws:rds:*:*:cluster-snapshot:${var.project_name}-*",
+        ]
+      },
+      {
+        Sid    = "RDSDescribeGlobal"
+        Effect = "Allow"
+        Action = [
+          "rds:DescribeDBClusters",
+          "rds:DescribeDBInstances",
+          "rds:DescribeDBSubnetGroups",
+          "rds:DescribeDBClusterSnapshots",
+          "rds:DescribeDBEngineVersions",
+          "rds:DescribeOrderableDBInstanceOptions",
+          "rds:DescribeDBClusterParameterGroups",
+          "rds:DescribeDBParameterGroups",
+          "rds:DescribeGlobalClusters",
+          "rds:DescribeEvents",
+        ]
+        Resource = "*"
+      },
+
+      # ── 6. KMS — customer-managed key lifecycle ────────────────────────────
+      #
+      # Resource="*" is required: kms:CreateKey has no ARN to scope to before
+      # the key exists, and kms:ListKeys/ListAliases are account-wide.
+      # TODO (prod hardening): split into CreateKey (Resource="*") and key-lifecycle
+      # actions (Resource=specific key ARN with aws:ResourceTag condition).
+      {
+        Sid    = "KMSManage"
+        Effect = "Allow"
+        Action = [
+          "kms:CreateKey",
+          "kms:DescribeKey",
+          "kms:EnableKeyRotation",
+          "kms:GetKeyPolicy",
+          "kms:GetKeyRotationStatus",
+          "kms:ListKeys",
+          "kms:ListAliases",
+          "kms:ListResourceTags",
+          "kms:PutKeyPolicy",
+          "kms:TagResource",
+          "kms:UntagResource",
+          "kms:ScheduleKeyDeletion",
+          "kms:CancelKeyDeletion",
+          "kms:CreateGrant",
+          "kms:ListGrants",
+          "kms:RevokeGrant",
+          "kms:CreateAlias",
+          "kms:DeleteAlias",
+          "kms:UpdateAlias",
+        ]
+        Resource = "*"
+      },
+
+      # ── 7. Secrets Manager — app secrets + Aurora master credential ────────
+      #
+      # App secrets follow platform/{service}/{env}/{name} naming (ARN suffix
+      # secret:platform/*).  The Aurora-managed master credential is named
+      # rds!* by AWS; Terraform reads its ARN from the cluster attributes.
+      # The ECS task role does NOT have access to rds!* secrets — the app
+      # authenticates via IAM token, never the master credential.
+      {
+        Sid    = "SecretsManagerAppSecrets"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:CreateSecret",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:TagResource",
+          "secretsmanager:UntagResource",
+          "secretsmanager:ListSecretVersionIds",
+          "secretsmanager:RestoreSecret",
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:*:*:secret:platform/*", # app secrets
+          "arn:aws:secretsmanager:*:*:secret:rds!*",      # Aurora-managed master credential
+        ]
+      },
+      {
+        Sid      = "SecretsManagerList"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:ListSecrets"]
+        Resource = "*" # ListSecrets does not support resource-level permissions
+      },
+
+      # TODO (E3): add when wiring up ECS + ECR + ALB:
+      #   ecr:GetAuthorizationToken (Resource="*" — account-level, no ARN),
+      #   ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer,
+      #   ecr:BatchGetImage, ecr:DescribeRepositories, ecr:CreateRepository,
+      #   ecr:DeleteRepository, ecr:TagResource on specific ECR repo ARN,
+      #   ecs:CreateCluster, ecs:DeleteCluster, ecs:RegisterTaskDefinition,
+      #   ecs:DeregisterTaskDefinition, ecs:CreateService, ecs:DeleteService,
+      #   ecs:UpdateService, ecs:Describe* on project-prefixed cluster/service ARNs,
+      #   elasticloadbalancing:* scoped to project-prefixed ALB/listener/TG ARNs,
       #   logs:CreateLogGroup, logs:DeleteLogGroup, logs:DescribeLogGroups,
-      #   logs:PutRetentionPolicy, logs:TagLogGroup,
-      #   secretsmanager:CreateSecret, secretsmanager:DeleteSecret,
-      #   secretsmanager:DescribeSecret, secretsmanager:GetSecretValue,
-      #   secretsmanager:PutSecretValue, secretsmanager:TagResource,
-      #   elasticloadbalancing:* (ALB + target groups + listeners)
+      #   logs:PutRetentionPolicy, logs:TagLogGroup
 
-      # TODO (E3): add for Aurora + KMS:
-      #   rds:*, kms:CreateKey, kms:DescribeKey, kms:CreateAlias,
-      #   kms:DeleteAlias, kms:EnableKeyRotation, kms:TagResource,
-      #   kms:CreateGrant (for RDS to use the key)
-
-      # TODO (E4): add for CloudWatch metrics + alarms:
+      # TODO (E4): add for CloudWatch metrics + alarms + billing notifications:
       #   cloudwatch:PutMetricAlarm, cloudwatch:DeleteAlarms,
       #   cloudwatch:DescribeAlarms, cloudwatch:PutDashboard,
+      #   sns:CreateTopic, sns:DeleteTopic, sns:SetTopicAttributes,
+      #   sns:GetTopicAttributes, sns:TagResource,
       #   logs:PutMetricFilter, logs:DeleteMetricFilter
 
     ]
@@ -261,7 +384,7 @@ resource "aws_iam_role_policy" "github_deploy" {
 
 resource "aws_iam_role" "ecs_task_execution" {
   name        = "${local.prefix}-ecs-task-execution"
-  description = "ECS agent role: pull images from ECR, write logs to CloudWatch (permissions added in E2)."
+  description = "ECS agent role: pull images from ECR, write logs to CloudWatch (permissions added in E3)."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -277,7 +400,7 @@ resource "aws_iam_role" "ecs_task_execution" {
 
   tags = merge(local.tags, { Name = "${local.prefix}-ecs-task-execution" })
 
-  # TODO (E2): attach inline policies for:
+  # TODO (E3): attach inline policies for:
   #   - ecr:GetAuthorizationToken on * (required — no resource ARN for auth token)
   #   - ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer,
   #     ecr:BatchGetImage on the specific ECR repository ARN
@@ -297,7 +420,7 @@ resource "aws_iam_role" "ecs_task_execution" {
 
 resource "aws_iam_role" "ecs_task" {
   name        = "${local.prefix}-ecs-task"
-  description = "Application runtime role: Secrets Manager + RDS IAM auth (permissions added in E2/E3)."
+  description = "Application runtime role: Secrets Manager + RDS IAM auth."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -313,11 +436,10 @@ resource "aws_iam_role" "ecs_task" {
 
   tags = merge(local.tags, { Name = "${local.prefix}-ecs-task" })
 
-  # TODO (E2): attach inline policy for:
-  #   secretsmanager:GetSecretValue, secretsmanager:DescribeSecret
-  #   on arn:aws:secretsmanager:*:*:secret:platform/<service>/<env>/*
-  #
-  # TODO (E3): attach inline policy for:
-  #   rds-db:connect on the Aurora cluster resource ARN
-  #   (enables RDS IAM authentication — no password needed in the app)
+  # The inline policy for this role (rds-db:connect, secretsmanager:*, kms:Decrypt)
+  # is attached as aws_iam_role_policy.ecs_task in infra/envs/dev/main.tf rather
+  # than here.  This avoids a module dependency cycle: the rds-db:connect ARN
+  # requires the Aurora cluster_resource_id (from the data module), which depends
+  # on the KMS key (from the kms module), which in turn references this role's ARN.
+  # Placing the policy in the root module (envs/dev) breaks the cycle cleanly.
 }

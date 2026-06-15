@@ -9,8 +9,13 @@ output "ecs_task_execution_role_arn" {
 }
 
 output "ecs_task_role_arn" {
-  description = "ARN of the ECS task role (used by the application container). Pass to the task definition in E2."
+  description = "ARN of the ECS task role (used by the application container). Pass to the task definition in E3."
   value       = aws_iam_role.ecs_task.arn
+}
+
+output "ecs_task_role_name" {
+  description = "Name of the ECS task role. Used by the aws_iam_role_policy.ecs_task resource in envs/dev to attach the runtime policy without creating a module dependency cycle."
+  value       = aws_iam_role.ecs_task.name
 }
 
 output "oidc_provider_arn" {

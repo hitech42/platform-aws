@@ -63,3 +63,25 @@ variable "vpc_cidr" {
   type        = string
   default     = "10.0.0.0/16"
 }
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+variable "db_name" {
+  description = "Name of the initial database in the Aurora cluster."
+  type        = string
+  default     = "platform"
+}
+
+variable "db_username" {
+  description = "Username for the IAM-authenticated application DB user. Created by infra/scripts/setup-db-user.sh after the first apply — not the Aurora master user (postgres)."
+  type        = string
+  default     = "platform_app"
+}
+
+# ── Billing alarm ─────────────────────────────────────────────────────────────
+
+variable "billing_alarm_threshold" {
+  description = "USD threshold for the CloudWatch estimated-charges billing alarm. Subscribe your email to the billing_alarm_topic_arn SNS output to receive alerts."
+  type        = number
+  default     = 20
+}

@@ -83,24 +83,25 @@ run "github_deploy_policy_no_wildcard_actions" {
   }
 }
 
-# ── ECS task roles: no policies attached in this stage ───────────────────────
+# ── ECS task roles: no inline policies in the iam module ─────────────────────
 #
-# Permissions are added in E2 (ECR, CloudWatch Logs, Secrets Manager) and
-# E3 (RDS IAM auth).  These assertions guard against accidentally attaching
-# permissions before the specific ARNs exist for proper scoping.
-# Update these tests in E2/E3 to verify the expected policy content.
+# The ECS task role's runtime policy (rds-db:connect, secretsmanager, kms:Decrypt)
+# lives in infra/envs/dev/main.tf as aws_iam_role_policy.ecs_task, not here.
+# This is deliberate: the policy needs the Aurora cluster_resource_id (from the
+# data module) which creates a dependency cycle if placed inside this module.
+# The execution role's policies are added in E3 (ECR + CloudWatch Log group ARNs).
 
 run "ecs_roles_have_no_inline_policies" {
   command = apply
 
   assert {
     condition     = length(aws_iam_role.ecs_task_execution.inline_policy) == 0
-    error_message = "ECS task execution role must have no inline policies at this stage. Permissions will be added in E2 once ECR repo and log group ARNs are known."
+    error_message = "ECS task execution role must have no inline policies in the iam module. Permissions are added in E3 once ECR repo and log group ARNs are known."
   }
 
   assert {
     condition     = length(aws_iam_role.ecs_task.inline_policy) == 0
-    error_message = "ECS task role must have no inline policies at this stage. Permissions will be added in E2/E3 once secret and Aurora cluster ARNs are known."
+    error_message = "ECS task role inline policy lives in envs/dev (not here) to avoid a module dependency cycle. See aws_iam_role_policy.ecs_task in infra/envs/dev/main.tf."
   }
 }
 
@@ -120,5 +121,63 @@ run "ecs_roles_trust_ecs_tasks_only" {
   assert {
     condition     = jsondecode(aws_iam_role.ecs_task.assume_role_policy).Statement[0].Principal.Service == "ecs-tasks.amazonaws.com"
     error_message = "ECS task role trust policy must allow only ecs-tasks.amazonaws.com."
+  }
+}
+
+# ── GitHub deploy policy: RDS scoped to project-prefixed ARNs ────────────────
+#
+# RDS mutating actions must be scoped to project-prefixed resource ARNs —
+# not account-wide "*".  Describe actions may use "*" (AWS limitation).
+
+run "github_deploy_rds_scoped" {
+  command = apply
+
+  # The RDSManage statement must exist and its resources must all start with
+  # arn:aws:rds — never a bare "*".
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "RDSManage" &&
+      alltrue([for r in tolist(s.Resource) : startswith(r, "arn:aws:rds:")])
+    ])
+    error_message = "RDSManage statement must exist and scope all resources to arn:aws:rds:* ARNs, not '*'."
+  }
+
+  # RDS mutating actions must be scoped to project-prefixed cluster/db/subgrp ARNs.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "RDSManage" &&
+      anytrue([for r in tolist(s.Resource) : can(regex("arn:aws:rds:\\*:\\*:cluster:${var.project_name}-\\*", r))])
+    ])
+    error_message = "RDSManage resources must include arn:aws:rds:*:*:cluster:{project_name}-* to scope cluster operations to this project."
+  }
+}
+
+# ── GitHub deploy policy: Secrets Manager scoped to /platform/* and rds!* ────
+#
+# The deploy role must not have access to arbitrary Secrets Manager secrets —
+# only the application namespace (platform/*) and Aurora master credential (rds!*).
+
+run "github_deploy_secrets_scoped" {
+  command = apply
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "SecretsManagerAppSecrets" &&
+      anytrue([for r in tolist(s.Resource) : can(regex("arn:aws:secretsmanager:\\*:\\*:secret:platform/\\*", r))])
+    ])
+    error_message = "SecretsManagerAppSecrets must scope resources to arn:aws:secretsmanager:*:*:secret:platform/* for app secrets."
+  }
+
+  # Must NOT grant GetSecretValue on wildcard "*" — that would expose all secrets.
+  assert {
+    condition = !anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      contains(tolist(s.Action), "secretsmanager:GetSecretValue") &&
+      contains(tolist(s.Resource), "*")
+    ])
+    error_message = "secretsmanager:GetSecretValue must never be granted on Resource='*'. Scope to platform/* and rds!* ARNs only."
   }
 }

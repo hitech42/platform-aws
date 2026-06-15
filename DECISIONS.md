@@ -222,3 +222,133 @@ Use **SSE-S3** (`AES256`) for the bootstrap state bucket.
 
 - **No KMS audit trail**: CloudTrail does not record SSE-S3 key use (there are no KMS API calls). SSE-KMS would provide per-request audit visibility. Accepted — S3 access logs and CloudTrail S3 data events are sufficient for this use case.
 - **No key rotation control**: SSE-S3 key rotation is managed by AWS and is not configurable. SSE-KMS CMKs can be rotated on a custom schedule. Accepted at this stage.
+
+---
+
+## ADR-008: Aurora PostgreSQL Serverless v2 for the Application Database
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+The application needs a managed relational database (PostgreSQL). Options considered:
+
+1. **RDS PostgreSQL (provisioned)**: always-on, fixed instance size, predictable cost (~$15–30/month for `db.t3.micro`).
+2. **Aurora PostgreSQL Serverless v2**: scales ACUs up/down automatically; can scale to 0.5 ACU at idle (≈$0.06/ACU-hour).
+3. **Aurora PostgreSQL Serverless v1** (legacy): scales to zero but cold-start latency is high (seconds); `engine_mode = "serverless"`; Data API only (no persistent connections); deprecated for new clusters.
+
+### Decision
+
+Use **Aurora PostgreSQL Serverless v2** (`engine_mode = "provisioned"` with `serverlessv2_scaling_configuration`, `min_capacity = 0.5`, `max_capacity = 1.0` in dev).
+
+**Gotcha to preserve**: Serverless v2 uses `engine_mode = "provisioned"` in the Terraform `aws_rds_cluster` resource — **not** `"serverless"`. The `serverlessv2_scaling_configuration` block declares the scaling profile. `"serverless"` in the Terraform API refers to the legacy v1 API; using it would create a v1 cluster.
+
+### Rationale
+
+- **Cost at dev scale**: at 0.5 ACU idle, the cluster costs ~$0.06/hour — roughly comparable to a `db.t3.micro` RDS instance but with zero operational overhead for sizing.
+- **Scales up for load tests**: `max_capacity = 1.0` ACU can be raised to 4–16 for staging/prod or load testing with a single variable change.
+- **IAM auth support**: Serverless v2 supports `iam_database_authentication_enabled = true`, which is required for the application's passwordless authentication model.
+- **RDS Data API**: `enable_http_endpoint = true` allows `aws rds-data execute-statement` from any machine with IAM credentials — used by the IAM DB user bootstrap script without needing VPC connectivity.
+- **Managed master credential**: `manage_master_user_password = true` delegates master password rotation to AWS (Secrets Manager, encrypted with the platform CMK). The password never appears in Terraform state.
+
+### Trade-offs
+
+- **Minimum cost**: at 0.5 ACU the cluster cannot scale below that, so cost is ~$0.06/hour even when completely idle. Unlike Serverless v1, it does not scale to zero.
+- **Cold-scale latency**: scaling from 0.5 to higher ACUs takes seconds. Acceptable for an internal tool with no strict latency SLA.
+- **Data API throughput**: the Data API (used only by the bootstrap script, not the running app) has per-request overhead. The app connects via a direct TCP connection using IAM token auth, not the Data API.
+
+---
+
+## ADR-009: manage_master_user_password — No Passwords in Terraform State
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+When provisioning a database cluster, Terraform must supply a master password. The naive approach is `master_password = var.db_password`, which stores the password in plaintext in `terraform.tfstate`. Even with S3-at-rest encryption, state files are sensitive artifacts; exposing admin credentials in state is a well-known Terraform anti-pattern.
+
+### Decision
+
+Set `manage_master_user_password = true` on `aws_rds_cluster.aurora`. AWS creates and rotates the master credential as a Secrets Manager secret (in the `rds!*` namespace, encrypted with the platform CMK). Terraform never sees or stores the password.
+
+### Rationale
+
+- **No plaintext credential in state**: `terraform.tfstate` contains only the Secrets Manager secret ARN (`master_user_secret[0].secret_arn`), not the password value.
+- **Automatic rotation**: AWS rotates the master credential on a configurable schedule. No Terraform or operator action is required.
+- **Break-glass access**: the master credential is available in Secrets Manager for DBA / break-glass access — but scoped to the `rds!*` namespace. The ECS task role explicitly excludes `rds!*` from its `secretsmanager:GetSecretValue` permission, so the app cannot access the admin password.
+- **App never uses the master credential**: the application connects as `platform_app` via IAM token auth (`rds-db:connect`). The master credential is for administrative operations only.
+
+### Trade-offs
+
+- **Bootstrap dependency**: the bootstrap script (`infra/scripts/setup-db-user.sh`) uses the master credential (via Data API) to `CREATE USER platform_app` and `GRANT rds_iam`. This one-time step must run after `terraform apply` and before the app can connect. If the secret rotates during the bootstrap step, the script may need to re-authenticate — acceptable since rotation is daily by default.
+- **Terraform state still contains the secret ARN**: the ARN is exposed in state and in the `aurora_master_secret_arn` output. The ARN does not grant access (IAM is required), so it is not treated as sensitive.
+
+---
+
+## ADR-010: RDS Data API for IAM DB User Bootstrap
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+After the Aurora cluster is provisioned, a one-time SQL operation is required:
+
+```sql
+CREATE USER platform_app;
+GRANT rds_iam TO platform_app;
+```
+
+Options for running this SQL:
+
+1. **Manual psql**: operator connects via a bastion host or VPN. Requires network connectivity into the private subnet.
+2. **Lambda in the VPC**: a Lambda function runs the SQL via `psycopg2`. Requires a Lambda, IAM role, and VPC attachment — significant infrastructure for a one-time step.
+3. **RDS Data API** (`aws rds-data execute-statement`): HTTP/IAM-based SQL execution. No VPC connectivity required; runs from any machine with IAM credentials.
+
+### Decision
+
+Use the **RDS Data API** via `infra/scripts/setup-db-user.sh`. The script is idempotent (the `CREATE USER` error is swallowed; `GRANT rds_iam` is safe to re-run).
+
+### Rationale
+
+- **No VPC connectivity needed**: the script runs from the operator's machine or a CI job. No bastion, no VPN, no Lambda.
+- **Least new infrastructure**: `enable_http_endpoint = true` on the cluster (already required for dev flexibility) is the only prerequisite.
+- **Simplicity**: a 30-line shell script that reads Terraform outputs directly. Outputs the cluster ARN, master secret ARN, and database name; calls `aws rds-data execute-statement` twice.
+- **Idempotent**: can be re-run safely if something went wrong. `CREATE USER` failure is ignored; `GRANT rds_iam` is a no-op if already granted.
+
+### Trade-offs
+
+- **Data API must remain enabled**: `enable_http_endpoint = true` must not be set to `false` in dev while the platform_app user might need to be recreated. In staging/prod where the operator has VPN or bastion access, it can be disabled after bootstrap.
+- **Manual step**: the bootstrap script is not triggered automatically by Terraform. The operator must run it after `terraform apply`. This is documented in `README.md` and the CLAUDE.md `post-apply steps` section.
+
+---
+
+## ADR-011: S3 Native State Locking (use_lockfile) Instead of DynamoDB
+
+**Date**: 2026-06-14
+**Status**: Accepted
+
+### Context
+
+Terraform requires state locking to prevent concurrent `apply` operations from corrupting shared state. Historically, the recommended AWS pattern used an S3 bucket for state storage and a DynamoDB table for lock tokens (a conditional-write on a known key).
+
+Starting with Terraform 1.10, the S3 backend supports **native state locking** via a `.tflock` file written atomically to S3 using conditional writes (`If-None-Match`). No DynamoDB table is required.
+
+### Decision
+
+Use `use_lockfile = true` in `infra/envs/dev/backend.tf` and remove the DynamoDB table from `infra/bootstrap/`. The bootstrap module now provisions only an S3 bucket.
+
+### Rationale
+
+- **One fewer resource**: eliminating the DynamoDB table removes ~$0/month cost (it was on the free tier, but the bootstrap module is simpler with one resource instead of two).
+- **One fewer IAM permission category**: the GitHub Actions deploy role no longer needs `dynamodb:GetItem / PutItem / DeleteItem` on the lock table.
+- **S3 conditional writes are equivalent**: `If-None-Match: *` on a `PutObject` call provides the same mutual-exclusion guarantee as a DynamoDB conditional write. AWS has had atomic conditional-write support in S3 since 2024.
+- **Terraform 1.10 is current**: the project already targets `>= 1.10` (`required_version` in `providers.tf`). There is no compatibility constraint preventing adoption.
+
+### Trade-offs
+
+- **Requires Terraform ≥ 1.10**: earlier Terraform versions do not support `use_lockfile`. Operators must upgrade before running `terraform init` in this repository.
+- **S3 bucket must support conditional writes**: requires a standard S3 bucket (not a bucket with Object Lock or Requester Pays enabled in certain configurations). The bootstrap bucket has neither constraint.
+- **Lock file visible in S3**: the `.tflock` file appears in the S3 console during active applies. This is cosmetically different from DynamoDB but functionally equivalent.

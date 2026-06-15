@@ -253,7 +253,7 @@ pytest tests/integration -v   # uses testcontainers locally
 
 | Tool | Version |
 |---|---|
-| Terraform | ≥ 1.7 |
+| Terraform | ≥ 1.10 |
 | AWS provider | ~> 5.0 |
 
 ### Module layout
@@ -261,7 +261,7 @@ pytest tests/integration -v   # uses testcontainers locally
 ```
 infra/
 ├── bootstrap/          ← one-time manual apply; local backend; state stored in repo
-│   ├── main.tf         ← S3 bucket + DynamoDB lock table
+│   ├── main.tf         ← S3 bucket only (S3 native locking via use_lockfile=true)
 │   ├── variables.tf
 │   └── outputs.tf
 ├── modules/
@@ -270,16 +270,26 @@ infra/
 │   │   ├── variables.tf
 │   │   ├── outputs.tf
 │   │   └── tests/network.tftest.hcl
-│   └── iam/            ← GitHub OIDC provider, deploy role, ECS task role shells
+│   ├── iam/            ← GitHub OIDC provider, deploy role, ECS task role shells
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── tests/iam.tftest.hcl
+│   ├── kms/            ← Platform CMK (Aurora + Secrets Manager + CloudWatch)
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── tests/kms.tftest.hcl
+│   └── data/           ← Aurora PostgreSQL Serverless v2, subnet group
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
-│       └── tests/iam.tftest.hcl
+│       └── tests/data.tftest.hcl
 └── envs/
-    └── dev/            ← root module wiring network + iam
+    └── dev/            ← root module wiring network + iam + kms + data
         ├── backend.tf
         ├── providers.tf
-        ├── main.tf
+        ├── main.tf     ← also contains aws_iam_role_policy.ecs_task + billing alarm
         ├── variables.tf
         ├── outputs.tf
         ├── terraform.tfvars
@@ -305,12 +315,31 @@ The GitHub Actions deploy role (`{project_name}-{environment}-github-deploy`) is
 
 | Session | Permissions added |
 |---|---|
-| E1 (this session) | S3 + DynamoDB (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
-| E2 | ECS, ECR, ALB, Secrets Manager |
-| E3 | Aurora/RDS, KMS |
+| E1 | S3 (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
+| E2 (done) | RDS cluster/instance/subnet-group (project-scoped ARNs), KMS CreateKey + alias + grant management, Secrets Manager platform/* + rds!* |
+| E3 | ECS, ECR, ALB |
 | E4 | CloudWatch Logs/metrics |
 
 `ec2:Describe*` and VPC-mutate actions use `Resource: "*"` because EC2 does not support resource-level ARNs for Describe operations, and tag-based conditions require the resources to exist before the policy can reference them. Add tag-based conditions in staging/prod once VPC IDs are known (see TODO in `infra/modules/iam/main.tf`).
+
+### ECS task role inline policy (dependency cycle note)
+
+The ECS task role's runtime policy (`rds-db:connect`, `secretsmanager`, `kms:Decrypt`) lives in `infra/envs/dev/main.tf` as `aws_iam_role_policy.ecs_task` — **not** inside `infra/modules/iam/`. This breaks the dependency cycle:
+
+```
+iam (creates task role ARN) → kms (key policy embeds task role ARN)
+  → data (needs kms_key_arn) → [policy needs data.cluster_resource_id]
+```
+
+Placing the policy in `envs/dev` means `iam → kms → data` is a clean DAG. The `ecs_task_role_name` output from the iam module is used to attach the policy by name.
+
+### Aurora Serverless v2 (data module)
+
+- `engine_mode = "provisioned"` — **not** `"serverless"` (that is the legacy v1 API). Serverless v2 uses `provisioned` mode with a `serverlessv2_scaling_configuration` block.
+- `manage_master_user_password = true` — AWS manages the master credential in Secrets Manager, encrypted with the platform CMK. No password ever appears in Terraform state.
+- `enable_http_endpoint = true` (default) — enables the RDS Data API, required by `infra/scripts/setup-db-user.sh` to CREATE the `platform_app` IAM-auth user via `aws rds-data execute-statement` without needing VPC connectivity.
+- `iam_database_authentication_enabled = true` — the app connects as `platform_app` using an IAM-generated token; no password.
+- After `terraform apply`, run the one-time user bootstrap: `bash infra/scripts/setup-db-user.sh infra/envs/dev`
 
 ### Terraform tests
 
@@ -320,23 +349,28 @@ All tests use `mock_provider "aws" {}` — no real AWS credentials required.
 
 - **Network tests** (`command = plan`): fast; no resources are created.
 - **IAM tests** (`command = apply`): required because `assume_role_policy` embeds a computed OIDC provider ARN; the value is unknown at plan time even with a mock provider.
+- **KMS tests** (`command = apply` for key_policy_principals): `data.aws_caller_identity.current.account_id` is needed to assert the key policy — must use `override_data` to supply a known account ID.
+- **Data tests** (`command = plan`): all assertions target attributes set directly in HCL (not computed by AWS), so plan-time values are sufficient.
+- **envs/dev tests** (`command = apply`): module.kms and module.data are `override_module`'d to supply valid-format ARNs — the mock provider returns non-ARN strings for computed outputs, which fails ARN validation in downstream resources.
 - **Override `data.aws_availability_zones.available`**: every network test run must supply `override_data` with mock AZ names — the mock provider returns `null` for unset list attributes, which causes `element()` to panic.
 - **`coalesce(value, [])`**: wrap mock-provider list attributes that may be `null` (e.g., `cidr_blocks`, `ipv6_cidr_blocks` on security group rules) before calling `length()`.
 
 To run tests:
 
 ```bash
-# Network module
-cd infra/modules/network
-terraform init -backend=false && terraform test
-
-# IAM module
-cd infra/modules/iam
-terraform init -backend=false && terraform test
+# Individual modules
+terraform -chdir=infra/modules/network test
+terraform -chdir=infra/modules/iam test
+terraform -chdir=infra/modules/kms test
+terraform -chdir=infra/modules/data test
 
 # envs/dev root module
-cd infra/envs/dev
-terraform init -backend=false && terraform test
+terraform -chdir=infra/envs/dev test
+
+# All at once (23 tests total)
+for d in infra/modules/network infra/modules/iam infra/modules/kms infra/modules/data infra/envs/dev; do
+  terraform -chdir="$d" test
+done
 ```
 
 ### Terraform fmt and validate

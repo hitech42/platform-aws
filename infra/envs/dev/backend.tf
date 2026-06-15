@@ -20,7 +20,7 @@
 
 terraform {
   backend "s3" {
-    bucket       = "cvs-platform-tfstate-874505351468"
+    bucket       = "cvs-platform-tfstate-us-east-1-9f42b451"
     key          = "envs/dev/terraform.tfstate"
     region       = "us-east-1"
     use_lockfile = true
