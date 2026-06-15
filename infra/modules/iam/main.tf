@@ -222,7 +222,7 @@ resource "aws_iam_role_policy" "github_deploy" {
         Resource = "arn:aws:iam::*:role/${var.project_name}-*"
       },
 
-      # ── 5. RDS — Aurora cluster, instance, and subnet group ───────────────
+      # ── 5. RDS — instance and subnet group ───────────────────────────────────
       #
       # Mutating actions are scoped to project-prefixed resource ARNs.
       # Describe/List actions use Resource="*" — AWS does not support resource-
@@ -231,51 +231,41 @@ resource "aws_iam_role_policy" "github_deploy" {
         Sid    = "RDSManage"
         Effect = "Allow"
         Action = [
-          # Cluster lifecycle
-          "rds:CreateDBCluster",
-          "rds:DeleteDBCluster",
-          "rds:ModifyDBCluster",
-          "rds:StartDBCluster",
-          "rds:StopDBCluster",
-          "rds:RestoreDBClusterFromSnapshot",
           # Instance lifecycle
           "rds:CreateDBInstance",
           "rds:DeleteDBInstance",
           "rds:ModifyDBInstance",
           "rds:RebootDBInstance",
+          "rds:RestoreDBInstanceFromDBSnapshot",
           # Subnet group
           "rds:CreateDBSubnetGroup",
           "rds:DeleteDBSubnetGroup",
           "rds:ModifyDBSubnetGroup",
           # Snapshots
-          "rds:CreateDBClusterSnapshot",
-          "rds:DeleteDBClusterSnapshot",
-          "rds:CopyDBClusterSnapshot",
+          "rds:CreateDBSnapshot",
+          "rds:DeleteDBSnapshot",
+          "rds:CopyDBSnapshot",
           # Tags
           "rds:AddTagsToResource",
           "rds:RemoveTagsFromResource",
           "rds:ListTagsForResource",
         ]
         Resource = [
-          "arn:aws:rds:*:*:cluster:${var.project_name}-*",
           "arn:aws:rds:*:*:db:${var.project_name}-*",
           "arn:aws:rds:*:*:subgrp:${var.project_name}-*",
-          "arn:aws:rds:*:*:cluster-snapshot:${var.project_name}-*",
+          "arn:aws:rds:*:*:snapshot:${var.project_name}-*",
         ]
       },
       {
         Sid    = "RDSDescribeGlobal"
         Effect = "Allow"
         Action = [
-          "rds:DescribeDBClusters",
           "rds:DescribeDBInstances",
           "rds:DescribeDBSubnetGroups",
-          "rds:DescribeDBClusterSnapshots",
+          "rds:DescribeDBSnapshots",
           "rds:DescribeDBEngineVersions",
           "rds:DescribeOrderableDBInstanceOptions",
-          "rds:DescribeDBClusterParameterGroups",
           "rds:DescribeDBParameterGroups",
-          "rds:DescribeGlobalClusters",
           "rds:DescribeEvents",
         ]
         Resource = "*"
@@ -314,11 +304,11 @@ resource "aws_iam_role_policy" "github_deploy" {
         Resource = "*"
       },
 
-      # ── 7. Secrets Manager — app secrets + Aurora master credential ────────
+      # ── 7. Secrets Manager — app secrets + RDS master credential ─────────
       #
       # App secrets follow platform/{service}/{env}/{name} naming (ARN suffix
-      # secret:platform/*).  The Aurora-managed master credential is named
-      # rds!* by AWS; Terraform reads its ARN from the cluster attributes.
+      # secret:platform/*).  The RDS-managed master credential is named
+      # rds!* by AWS; Terraform reads its ARN from the instance attributes.
       # The ECS task role does NOT have access to rds!* secrets — the app
       # authenticates via IAM token, never the master credential.
       {
@@ -338,7 +328,7 @@ resource "aws_iam_role_policy" "github_deploy" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:platform/*", # app secrets
-          "arn:aws:secretsmanager:*:*:secret:rds!*",      # Aurora-managed master credential
+          "arn:aws:secretsmanager:*:*:secret:rds!*",      # RDS-managed master credential
         ]
       },
       {

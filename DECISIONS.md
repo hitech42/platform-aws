@@ -228,7 +228,7 @@ Use **SSE-S3** (`AES256`) for the bootstrap state bucket.
 ## ADR-008: Aurora PostgreSQL Serverless v2 for the Application Database
 
 **Date**: 2026-06-14
-**Status**: Accepted
+**Status**: Superseded by [ADR-012](#adr-012-standard-rds-postgresql-instead-of-aurora-serverless-v2)
 
 ### Context
 
@@ -271,7 +271,7 @@ When provisioning a database cluster, Terraform must supply a master password. T
 
 ### Decision
 
-Set `manage_master_user_password = true` on `aws_rds_cluster.aurora`. AWS creates and rotates the master credential as a Secrets Manager secret (in the `rds!*` namespace, encrypted with the platform CMK). Terraform never sees or stores the password.
+Set `manage_master_user_password = true` on `aws_db_instance.postgres`. AWS creates and rotates the master credential as a Secrets Manager secret (in the `rds!*` namespace, encrypted with the platform CMK). Terraform never sees or stores the password.
 
 ### Rationale
 
@@ -282,15 +282,15 @@ Set `manage_master_user_password = true` on `aws_rds_cluster.aurora`. AWS create
 
 ### Trade-offs
 
-- **Bootstrap dependency**: the bootstrap script (`infra/scripts/setup-db-user.sh`) uses the master credential (via Data API) to `CREATE USER platform_app` and `GRANT rds_iam`. This one-time step must run after `terraform apply` and before the app can connect. If the secret rotates during the bootstrap step, the script may need to re-authenticate — acceptable since rotation is daily by default.
-- **Terraform state still contains the secret ARN**: the ARN is exposed in state and in the `aurora_master_secret_arn` output. The ARN does not grant access (IAM is required), so it is not treated as sensitive.
+- **Bootstrap dependency**: the bootstrap script (`infra/scripts/setup-db-user.sh`) uses the master credential (via psql) to `CREATE USER platform_app` and `GRANT rds_iam`. This one-time step must run after `terraform apply` and before the app can connect. If the secret rotates during the bootstrap step, the script may need to re-authenticate — acceptable since rotation is daily by default.
+- **Terraform state still contains the secret ARN**: the ARN is exposed in state and in the `master_secret_arn` output. The ARN does not grant access (IAM is required), so it is not treated as sensitive.
 
 ---
 
 ## ADR-010: RDS Data API for IAM DB User Bootstrap
 
 **Date**: 2026-06-14
-**Status**: Accepted
+**Status**: Superseded by [ADR-012](#adr-012-standard-rds-postgresql-instead-of-aurora-serverless-v2)
 
 ### Context
 
@@ -352,3 +352,45 @@ Use `use_lockfile = true` in `infra/envs/dev/backend.tf` and remove the DynamoDB
 - **Requires Terraform ≥ 1.10**: earlier Terraform versions do not support `use_lockfile`. Operators must upgrade before running `terraform init` in this repository.
 - **S3 bucket must support conditional writes**: requires a standard S3 bucket (not a bucket with Object Lock or Requester Pays enabled in certain configurations). The bootstrap bucket has neither constraint.
 - **Lock file visible in S3**: the `.tflock` file appears in the S3 console during active applies. This is cosmetically different from DynamoDB but functionally equivalent.
+
+---
+
+## ADR-012: Standard RDS PostgreSQL Instead of Aurora Serverless v2
+
+**Date**: 2026-06-15
+**Status**: Accepted
+**Supersedes**: ADR-008 (Aurora Serverless v2), ADR-010 (RDS Data API bootstrap)
+
+### Context
+
+ADR-008 chose Aurora PostgreSQL Serverless v2. When `terraform apply` was run against a real AWS free-plan account, two problems surfaced:
+
+1. **`FreeTierRestrictionError`**: AWS free-plan accounts require the `WithExpressConfiguration` API parameter to create Aurora clusters. The Terraform AWS provider (5.100.0) has no schema support for this attribute — `terraform validate` rejects it as an unknown argument. There is no workaround within Terraform configuration; a console-create + import flow would be required.
+
+2. **Aurora Express Configuration removes VPC placement**: the AWS console screenshot of the Express Configuration flow showed that it uses engine v17 with no VPC selection, no subnet group, and AWS/RDS-owned encryption keys. The entire defence-in-depth stack (VPC isolation + security groups + CMK + IAM auth) is reduced to IAM auth as the sole access control layer. This is a security regression, not a cosmetic one.
+
+Options reconsidered:
+
+1. **Console-create Aurora + Terraform import**: works around the provider gap, but produces a cluster that `terraform plan` will perpetually show as drifted on the Express-only attributes. Fragile for CI.
+2. **Aurora outside free tier**: Aurora Serverless v2 is simply not free-tier eligible on AWS free-plan accounts. Estimated cost: ~$22–30/month at idle (0.5 ACU).
+3. **Standard RDS PostgreSQL (`aws_db_instance`)**: fully supported by provider 5.x, free-tier eligible (`db.t4g.micro` + 20 GiB gp2), and supports the full defence-in-depth stack (VPC + SGs + CMK + IAM auth).
+
+### Decision
+
+Switch the data module from `aws_rds_cluster` + `aws_rds_cluster_instance` to a single `aws_db_instance` with `engine = "postgres"`, `instance_class = "db.t4g.micro"`, `allocated_storage = 20`, `storage_type = "gp2"`.
+
+Bootstrap script (`infra/scripts/setup-db-user.sh`) switches from `aws rds-data execute-statement` (Data API, Aurora-only) to `psql` + `aws secretsmanager get-secret-value`.
+
+### Rationale
+
+- **Free-tier eligible**: `db.t4g.micro` + 20 GiB gp2 are within the AWS free-tier allowance for 12 months. Aurora (any mode) is not.
+- **Full defence-in-depth preserved**: VPC private subnet isolation + `db` security group (port 5432, `ecs_service_sg` only) + `publicly_accessible = false` + CMK encryption + IAM database authentication — all supported on standard RDS.
+- **No Terraform provider gap**: `aws_db_instance` has been in the provider since v1; all attributes used here are fully supported in 5.x.
+- **Same IAM auth model**: `iam_database_authentication_enabled = true` and `manage_master_user_password = true` are supported on standard RDS. The `rds-db:connect` IAM permission and `rds!*` Secrets Manager namespace both work identically — only the resource ID format changes from `cluster-XXXXX` to `db-XXXXX`.
+- **Simpler data model**: one resource (`aws_db_instance`) instead of two (`aws_rds_cluster` + `aws_rds_cluster_instance`). No reader endpoint, no ACU scaling variables.
+
+### Trade-offs
+
+- **No automatic scaling**: `db.t4g.micro` is a fixed instance class. If the workload grows, an instance resize is required (`ModifyDBInstance` with a brief maintenance window). Acceptable for an internal tool at dev scale.
+- **Bootstrap requires VPC access**: the Data API allowed running `CREATE USER` from any machine with IAM credentials. Standard RDS has no Data API; the bootstrap script now requires TCP access to port 5432 from within the VPC. In dev, the operator needs either an EC2 bastion, SSM port forwarding, or a one-off ECS Fargate task (natural option after E3). This is documented in `infra/scripts/setup-db-user.sh`.
+- **No reader endpoint**: `aws_db_instance` exposes a single endpoint. For staging/prod, consider a Multi-AZ deployment or a read replica with its own endpoint.

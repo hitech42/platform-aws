@@ -98,10 +98,10 @@ resource "aws_iam_role_policy" "ecs_task" {
         Sid    = "RDSIAMAuth"
         Effect = "Allow"
         Action = ["rds-db:connect"]
-        # Scoped to the exact cluster resource ID and app username.
-        # rds-db:connect on a wildcard cluster would allow the app to authenticate
-        # against any Aurora cluster in the account — this is never acceptable.
-        Resource = "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${module.data.cluster_resource_id}/${var.db_username}"
+        # Scoped to the exact instance resource ID (DbiResourceId, format db-XXXXX) and
+        # app username.  rds-db:connect on a wildcard resource would allow the app to
+        # authenticate against any RDS instance in the account — this is never acceptable.
+        Resource = "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${module.data.db_resource_id}/${var.db_username}"
       },
       {
         Sid    = "SecretsManagerAppSecrets"
@@ -114,7 +114,7 @@ resource "aws_iam_role_policy" "ecs_task" {
           "secretsmanager:GetSecretValue",
         ]
         # platform/* covers all application secrets this service creates and reads.
-        # The Aurora master credential (rds!* ARN) is intentionally excluded —
+        # The RDS master credential (rds!* ARN) is intentionally excluded —
         # the app authenticates via IAM token, never the master password.
         Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:platform/*"
       },

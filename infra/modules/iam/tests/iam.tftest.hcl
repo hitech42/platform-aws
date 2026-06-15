@@ -143,14 +143,14 @@ run "github_deploy_rds_scoped" {
     error_message = "RDSManage statement must exist and scope all resources to arn:aws:rds:* ARNs, not '*'."
   }
 
-  # RDS mutating actions must be scoped to project-prefixed cluster/db/subgrp ARNs.
+  # RDS mutating actions must be scoped to project-prefixed db/subgrp/snapshot ARNs.
   assert {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
       s.Sid == "RDSManage" &&
-      anytrue([for r in tolist(s.Resource) : can(regex("arn:aws:rds:\\*:\\*:cluster:${var.project_name}-\\*", r))])
+      anytrue([for r in tolist(s.Resource) : can(regex("arn:aws:rds:\\*:\\*:db:${var.project_name}-\\*", r))])
     ])
-    error_message = "RDSManage resources must include arn:aws:rds:*:*:cluster:{project_name}-* to scope cluster operations to this project."
+    error_message = "RDSManage resources must include arn:aws:rds:*:*:db:{project_name}-* to scope instance operations to this project."
   }
 }
 
