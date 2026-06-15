@@ -128,7 +128,7 @@ resource "aws_route_table_association" "private" {
 # simplification; staging/prod must use HTTPS.
 resource "aws_security_group" "alb" {
   name        = "${local.prefix}-alb-sg"
-  description = "ALB: HTTP from internet (HTTPS omitted for dev — see comment)"
+  description = "ALB: HTTP from internet (HTTPS omitted for dev - see comment)"
   vpc_id      = aws_vpc.main.id
 
   ingress {
