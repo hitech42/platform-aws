@@ -80,6 +80,13 @@ resource "aws_rds_cluster" "aurora" {
   deletion_protection = false
   skip_final_snapshot = true
 
+  # The RDS Data API (HTTP endpoint) lets you run SQL via aws rds-data without
+  # a direct TCP connection into the VPC.  Enabled so the IAM DB user bootstrap
+  # script (infra/scripts/setup-db-user.sh) can run from any machine with AWS
+  # credentials — no bastion or VPN required.  Still requires IAM authentication
+  # to use, so enabling it does not open a new attack surface.
+  enable_http_endpoint = var.enable_http_endpoint
+
   tags = merge(local.tags, { Name = "${local.prefix}-aurora" })
 }
 

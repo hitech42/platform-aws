@@ -1,3 +1,8 @@
+output "cluster_arn" {
+  description = "ARN of the Aurora cluster. Required by the RDS Data API (aws rds-data execute-statement --resource-arn) and for IAM policy scoping."
+  value       = aws_rds_cluster.aurora.arn
+}
+
 output "cluster_endpoint" {
   description = "Writer endpoint for the Aurora cluster. Use in DATABASE_URL for read-write connections."
   value       = aws_rds_cluster.aurora.endpoint

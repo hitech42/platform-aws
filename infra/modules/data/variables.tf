@@ -67,6 +67,18 @@ variable "engine_version" {
   default     = "16.4"
 }
 
+variable "enable_http_endpoint" {
+  description = <<-EOT
+    Enable the RDS Data API (HTTP endpoint) on the Aurora cluster.
+    When true, SQL can be executed via `aws rds-data execute-statement` without
+    a direct TCP connection into the VPC — required by the IAM DB user bootstrap
+    script (infra/scripts/setup-db-user.sh).  Still requires IAM auth to use.
+    Set false in staging/prod if your security policy prohibits Data API exposure.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "min_capacity" {
   description = "Minimum Aurora Serverless v2 capacity in ACUs (0.5 is the minimum). Aurora scales down to this when idle."
   type        = number
