@@ -42,11 +42,14 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 # ── S3 remote-state bucket ────────────────────────────────────────────────────
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
+}
 
 resource "aws_s3_bucket" "tfstate" {
   # Include account ID to guarantee global uniqueness without a random suffix
   # (random suffixes are harder to communicate to the team).
-  bucket = "${var.project_name}-tfstate-${data.aws_caller_identity.current.account_id}"
+  bucket = "${var.project_name}-tfstate-${var.aws_region}-${random_id.bucket_suffix.hex}"
 
   # Prevent accidental destruction of the bucket that holds all Terraform state.
   lifecycle {

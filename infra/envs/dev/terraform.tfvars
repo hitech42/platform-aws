@@ -20,7 +20,7 @@ allowed_refs = ["refs/heads/develop"]
 
 # From bootstrap outputs — fill in after running `terraform apply` in infra/bootstrap/.
 # Must also be copied into backend.tf (backend config does not support variables).
-state_bucket_name = "cvs-platform-tfstate-874505351468"
+state_bucket_name = "cvs-platform-tfstate-us-east-1-9f42b451"
 
 # ── Database (module defaults match these values; explicit for clarity) ────────
 db_name     = "platform"
