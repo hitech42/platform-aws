@@ -39,8 +39,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_caller_identity" "current" {}
-
 # ── S3 remote-state bucket ────────────────────────────────────────────────────
 resource "random_id" "bucket_suffix" {
   byte_length = 4
