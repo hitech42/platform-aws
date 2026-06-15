@@ -28,6 +28,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
   # Local backend — intentional.  This is the one module that cannot use
   # the remote state bucket because that bucket doesn't exist yet.
@@ -42,6 +46,13 @@ provider "aws" {
 # ── S3 remote-state bucket ────────────────────────────────────────────────────
 resource "random_id" "bucket_suffix" {
   byte_length = 4
+  # Keepers tie the suffix to stable inputs so the hex value never changes
+  # unless you intentionally change the project name or region (which would
+  # mean a new bucket anyway).
+  keepers = {
+    project_name = var.project_name
+    aws_region   = var.aws_region
+  }
 }
 
 resource "aws_s3_bucket" "tfstate" {
