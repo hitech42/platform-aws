@@ -17,10 +17,10 @@
 
 terraform {
   backend "s3" {
-    bucket         = "REPLACE_WITH_bootstrap_state_bucket_name_output"
+    bucket         = "cvs-platform-tfstate-874505351468"
     key            = "envs/dev/terraform.tfstate"
     region         = "us-east-1"
-    dynamodb_table = "REPLACE_WITH_bootstrap_state_lock_table_name_output"
+    dynamodb_table = "cvs-platform-tfstate-lock"
     encrypt        = true
   }
 }

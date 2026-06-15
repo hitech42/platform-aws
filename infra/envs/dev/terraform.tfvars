@@ -8,8 +8,8 @@ aws_region   = "us-east-1"
 environment  = "dev"
 
 # GitHub — replace with your actual org and repo name.
-github_org  = "REPLACE_WITH_YOUR_GITHUB_ORG"
-github_repo = "REPLACE_WITH_YOUR_GITHUB_REPO"
+github_org  = "HiTech42"
+github_repo = "platform-aws"
 
 # Set to false if the GitHub OIDC provider already exists in this AWS account
 # (you'll get an EntityAlreadyExists error on plan if it does).
@@ -20,5 +20,5 @@ allowed_refs = ["refs/heads/develop"]
 
 # From bootstrap outputs — fill in after running `terraform apply` in infra/bootstrap/.
 # These must also be copied into backend.tf (backend config does not support variables).
-state_bucket_name     = "REPLACE_WITH_bootstrap_state_bucket_name_output"
-state_lock_table_name = "REPLACE_WITH_bootstrap_state_lock_table_name_output"
+state_bucket_name     = "cvs-platform-tfstate-874505351468"
+state_lock_table_name = "cvs-platform-tfstate-lock"
