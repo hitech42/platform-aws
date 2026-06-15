@@ -180,7 +180,7 @@ terraform apply -var="project_name=cvs-platform"
 Note the output — you'll need it in the next step:
 
 ```
-state_bucket_name = "cvs-platform-tfstate-<account-id>"
+state_bucket_name = "cvs-platform-tfstate-<region>-<random-id>"
 ```
 
 Commit the generated `infra/bootstrap/terraform.tfstate` — it is intentionally not gitignored.
@@ -190,7 +190,7 @@ Commit the generated `infra/bootstrap/terraform.tfstate` — it is intentionally
 Edit `infra/envs/dev/backend.tf` and replace the placeholder with the bootstrap output:
 
 ```hcl
-bucket = "cvs-platform-tfstate-<account-id>"
+bucket = "cvs-platform-tfstate-<region>-<random-id>"
 ```
 
 State locking uses S3 native locking (`use_lockfile = true`) — no DynamoDB entry needed here.
@@ -200,7 +200,7 @@ Edit `infra/envs/dev/terraform.tfvars` and replace the `REPLACE_WITH_*` placehol
 ```hcl
 github_org        = "your-org"
 github_repo       = "your-repo"
-state_bucket_name = "cvs-platform-tfstate-<account-id>"
+state_bucket_name = "cvs-platform-tfstate-<region>-<random-id>"
 ```
 
 If the GitHub OIDC provider already exists in this account (from another project), set `create_oidc_provider = false`.
