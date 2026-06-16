@@ -1,30 +1,52 @@
 from collections.abc import Generator
+from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import ConnectionPoolEntry, NullPool
 
 from app.src.core.config import settings
+from app.src.db.iam_auth import generate_iam_auth_token
 
 
-def get_connect_args() -> dict:  # type: ignore[type-arg]
-    if settings.db_auth_mode == "iam":
-        # TODO: generate a short-lived RDS IAM auth token here using:
-        #   boto3.client("rds").generate_db_auth_token(Host, Port, DBUser, Region)
-        # Then pass it as the password via connect_args={"password": token}.
-        # The engine must also be created without connection pooling (pool_size=0)
-        # because tokens expire after 15 minutes.
-        raise NotImplementedError("IAM DB auth is not yet implemented")
+def get_connect_args() -> dict[str, Any]:
     # connect_timeout: seconds to wait for TCP connection — prevents health checks
     # from hanging indefinitely when Postgres is unreachable.
     return {"connect_timeout": 5}
 
 
-engine = create_engine(
-    settings.database_url,
-    connect_args=get_connect_args(),
-    pool_pre_ping=True,
-    echo=settings.environment == "dev",
-)
+def _build_engine() -> Engine:
+    url = make_url(settings.database_url)
+
+    if settings.db_auth_mode != "iam":
+        return create_engine(
+            url,
+            connect_args=get_connect_args(),
+            pool_pre_ping=True,
+            echo=settings.environment == "dev",
+        )
+
+    # NullPool: IAM auth tokens expire after 15 minutes, so every physical
+    # connection must be opened with a freshly generated token rather than
+    # reusing a token issued for an earlier pooled connection.
+    engine = create_engine(
+        url,
+        connect_args=get_connect_args(),
+        poolclass=NullPool,
+        echo=settings.environment == "dev",
+    )
+
+    @event.listens_for(engine, "do_connect")
+    def _inject_iam_token(
+        dialect: Any, conn_rec: ConnectionPoolEntry, cargs: list[Any], cparams: dict[str, Any]
+    ) -> None:
+        cparams["password"] = generate_iam_auth_token(url)
+
+    return engine
+
+
+engine = _build_engine()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
