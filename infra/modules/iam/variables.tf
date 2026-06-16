@@ -73,6 +73,22 @@ variable "allowed_refs" {
   default     = ["refs/heads/develop"]
 }
 
+variable "allowed_environments" {
+  description = <<-EOT
+    List of GitHub Actions environment names that are allowed to assume this
+    role. Required in addition to (not instead of) allowed_refs: when a
+    workflow job declares `environment: <name>`, GitHub's OIDC token `sub`
+    claim switches from `repo:ORG/REPO:ref:refs/heads/BRANCH` to
+    `repo:ORG/REPO:environment:<name>` — it no longer carries the ref at all.
+    Any job that declares an environment (e.g. to read an environment-scoped
+    variable like AWS_DEPLOY_ROLE_ARN) needs its environment name listed here,
+    or AssumeRoleWithWebIdentity is denied even though allowed_refs matches
+    the branch the workflow ran on.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 # ── State backend ─────────────────────────────────────────────────────────────
 
 variable "state_bucket_name" {

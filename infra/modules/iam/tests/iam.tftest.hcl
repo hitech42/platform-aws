@@ -55,6 +55,40 @@ run "github_role_trust_policy" {
   }
 }
 
+# ── GitHub Actions role: OIDC trust policy — environment-scoped jobs ─────────
+#
+# A job that declares `environment: dev` gets a sub claim of
+# "repo:ORG/REPO:environment:dev" instead of the ref-based form — the ref
+# component is replaced, not appended. allowed_environments must produce a
+# matching subject or AssumeRoleWithWebIdentity is denied even when the
+# workflow ran on an allowed branch.
+
+run "github_role_trust_policy_environment_scoped" {
+  command = apply
+
+  variables {
+    allowed_environments = ["dev"]
+  }
+
+  assert {
+    condition = contains(
+      jsondecode(aws_iam_role.github_deploy.assume_role_policy).Statement[0].Condition.StringLike["token.actions.githubusercontent.com:sub"],
+      "repo:myorg/myrepo:environment:dev"
+    )
+    error_message = "OIDC trust sub condition must include 'repo:ORG/REPO:environment:ENV' for each entry in allowed_environments, so jobs that declare `environment:` can still assume this role."
+  }
+
+  # The ref-based subject must still be present — allowed_environments adds
+  # to allowed_refs, it does not replace it.
+  assert {
+    condition = contains(
+      jsondecode(aws_iam_role.github_deploy.assume_role_policy).Statement[0].Condition.StringLike["token.actions.githubusercontent.com:sub"],
+      "repo:myorg/myrepo:ref:refs/heads/develop"
+    )
+    error_message = "Setting allowed_environments must not remove the ref-based subjects from allowed_refs."
+  }
+}
+
 # ── GitHub Actions role: deploy policy — no catch-all wildcard actions ────────
 
 run "github_deploy_policy_no_wildcard_actions" {

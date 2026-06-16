@@ -39,6 +39,7 @@ module "iam" {
   github_repo          = var.github_repo
   create_oidc_provider = var.create_oidc_provider
   allowed_refs         = var.allowed_refs
+  allowed_environments = ["dev"] # app-build-push.yml / app-deploy.yml jobs declare environment: dev
   state_bucket_name    = var.state_bucket_name
   # oidc_thumbprints uses module default (known GitHub OIDC cert thumbprints)
 }

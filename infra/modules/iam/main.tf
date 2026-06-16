@@ -15,12 +15,16 @@ locals {
     ManagedBy   = "terraform"
   }
 
-  # Full OIDC subject claim pattern for this environment's allowed refs.
-  # e.g. "repo:hitech42/platform-aws:ref:refs/heads/develop"
-  oidc_subjects = [
-    for ref in var.allowed_refs :
-    "repo:${var.github_org}/${var.github_repo}:ref:${ref}"
-  ]
+  # Full OIDC subject claim patterns this role's trust policy accepts.
+  # Ref-based: "repo:hitech42/platform-aws:ref:refs/heads/develop" — used by
+  #   jobs that do NOT declare a GitHub environment.
+  # Environment-based: "repo:hitech42/platform-aws:environment:dev" — used by
+  #   jobs that DO declare `environment: dev` (the sub claim's ref component
+  #   is replaced entirely, not appended, when a job uses an environment).
+  oidc_subjects = concat(
+    [for ref in var.allowed_refs : "repo:${var.github_org}/${var.github_repo}:ref:${ref}"],
+    [for env in var.allowed_environments : "repo:${var.github_org}/${var.github_repo}:environment:${env}"],
+  )
 
   oidc_provider_arn = var.create_oidc_provider ? (
     aws_iam_openid_connect_provider.github[0].arn
