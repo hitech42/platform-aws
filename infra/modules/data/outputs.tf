@@ -1,31 +1,26 @@
-output "cluster_arn" {
-  description = "ARN of the Aurora cluster. Required by the RDS Data API (aws rds-data execute-statement --resource-arn) and for IAM policy scoping."
-  value       = aws_rds_cluster.aurora.arn
+output "db_arn" {
+  description = "ARN of the RDS PostgreSQL instance. Used for IAM policy scoping."
+  value       = aws_db_instance.postgres.arn
 }
 
-output "cluster_endpoint" {
-  description = "Writer endpoint for the Aurora cluster. Use in DATABASE_URL for read-write connections."
-  value       = aws_rds_cluster.aurora.endpoint
+output "db_endpoint" {
+  description = "Hostname of the RDS instance. Use in DATABASE_URL for read-write connections (combine with port output)."
+  value       = aws_db_instance.postgres.address
 }
 
-output "cluster_reader_endpoint" {
-  description = "Reader endpoint for the Aurora cluster. Routes to read-only replica instances when available; falls back to writer in single-instance dev."
-  value       = aws_rds_cluster.aurora.reader_endpoint
-}
-
-output "cluster_resource_id" {
-  description = "Cluster resource identifier (e.g. 'cluster-ABCDEFGHIJK'). Required to construct the rds-db:connect IAM permission ARN for IAM database authentication."
-  value       = aws_rds_cluster.aurora.cluster_resource_id
+output "db_resource_id" {
+  description = "Instance resource identifier (e.g. 'db-ABCDEFGHIJK'). Required to construct the rds-db:connect IAM permission ARN for IAM database authentication."
+  value       = aws_db_instance.postgres.resource_id
 }
 
 output "port" {
-  description = "Database port (5432 for Aurora PostgreSQL)."
-  value       = aws_rds_cluster.aurora.port
+  description = "Database port (5432 for PostgreSQL)."
+  value       = aws_db_instance.postgres.port
 }
 
 output "database_name" {
-  description = "Name of the default database in the Aurora cluster."
-  value       = aws_rds_cluster.aurora.database_name
+  description = "Name of the default database in the RDS instance."
+  value       = aws_db_instance.postgres.db_name
 }
 
 output "db_username" {
@@ -34,6 +29,6 @@ output "db_username" {
 }
 
 output "master_secret_arn" {
-  description = "ARN of the Aurora-managed master credential secret in Secrets Manager. For break-glass / administrative access only — the app never uses this credential."
-  value       = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
+  description = "ARN of the RDS-managed master credential secret in Secrets Manager. For break-glass / administrative access only — the app never uses this credential."
+  value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
 }

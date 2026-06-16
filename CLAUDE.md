@@ -167,7 +167,7 @@ Stored as `VARCHAR` with a CHECK constraint (not a PostgreSQL native ENUM type) 
 
 ### UUID strategy
 
-All primary keys use `sqlalchemy.Uuid` (SQLAlchemy 2.x portable type, resolves to native `UUID` on PostgreSQL/Aurora). Python-side `default=uuid.uuid4` generates the UUID at `session.flush()` time; `server_default=gen_random_uuid()` is a DDL fallback for raw-SQL inserts. **The UUID is `None` until the object is flushed** — this is expected SQLAlchemy column-default behaviour, not a bug.
+All primary keys use `sqlalchemy.Uuid` (SQLAlchemy 2.x portable type, resolves to native `UUID` on PostgreSQL). Python-side `default=uuid.uuid4` generates the UUID at `session.flush()` time; `server_default=gen_random_uuid()` is a DDL fallback for raw-SQL inserts. **The UUID is `None` until the object is flushed** — this is expected SQLAlchemy column-default behaviour, not a bug.
 
 ### Integration test approach
 
@@ -275,12 +275,12 @@ infra/
 │   │   ├── variables.tf
 │   │   ├── outputs.tf
 │   │   └── tests/iam.tftest.hcl
-│   ├── kms/            ← Platform CMK (Aurora + Secrets Manager + CloudWatch)
+│   ├── kms/            ← Platform CMK (RDS + Secrets Manager + CloudWatch)
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   ├── outputs.tf
 │   │   └── tests/kms.tftest.hcl
-│   └── data/           ← Aurora PostgreSQL Serverless v2, subnet group
+│   └── data/           ← RDS PostgreSQL (db.t4g.micro, free-tier), subnet group
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
@@ -303,9 +303,9 @@ Each environment gets **4 subnets across 2 AZs** (see ADR-005):
 | Subnet type | Count | Purpose | `map_public_ip_on_launch` |
 |---|---|---|---|
 | Public | 2 | ALB + ECS Fargate tasks | `true` |
-| Private | 2 | Aurora Serverless v2 | `false` |
+| Private | 2 | RDS PostgreSQL | `false` |
 
-Internet isolation for Aurora is enforced by the **private route table** (no default route, no NAT Gateway). The `db` security group adds a defence-in-depth layer (port 5432 from `ecs_service_sg` only, no CIDR inbound).
+Internet isolation for RDS is enforced by the **private route table** (no default route, no NAT Gateway) and `publicly_accessible = false` on the instance. The `db` security group adds a defence-in-depth layer (port 5432 from `ecs_service_sg` only, no CIDR inbound).
 
 ECS tasks run in public subnets without a NAT Gateway: they get public IPs and reach ECR / Secrets Manager / CloudWatch via the IGW directly. This is the trade-off for dev cost savings; staging/prod should add a NAT Gateway and move ECS to private subnets.
 
@@ -316,7 +316,7 @@ The GitHub Actions deploy role (`{project_name}-{environment}-github-deploy`) is
 | Session | Permissions added |
 |---|---|
 | E1 | S3 (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
-| E2 (done) | RDS cluster/instance/subnet-group (project-scoped ARNs), KMS CreateKey + alias + grant management, Secrets Manager platform/* + rds!* |
+| E2 (done) | RDS instance/subnet-group/snapshot (project-scoped ARNs), KMS CreateKey + alias + grant management, Secrets Manager platform/* + rds!* |
 | E3 | ECS, ECR, ALB |
 | E4 | CloudWatch Logs/metrics |
 
@@ -328,18 +328,19 @@ The ECS task role's runtime policy (`rds-db:connect`, `secretsmanager`, `kms:Dec
 
 ```
 iam (creates task role ARN) → kms (key policy embeds task role ARN)
-  → data (needs kms_key_arn) → [policy needs data.cluster_resource_id]
+  → data (needs kms_key_arn) → [policy needs data.db_resource_id]
 ```
 
 Placing the policy in `envs/dev` means `iam → kms → data` is a clean DAG. The `ecs_task_role_name` output from the iam module is used to attach the policy by name.
 
-### Aurora Serverless v2 (data module)
+### RDS PostgreSQL (data module)
 
-- `engine_mode = "provisioned"` — **not** `"serverless"` (that is the legacy v1 API). Serverless v2 uses `provisioned` mode with a `serverlessv2_scaling_configuration` block.
+- `engine = "postgres"`, `instance_class = "db.t4g.micro"`, `allocated_storage = 20`, `storage_type = "gp2"` — free-tier eligible. See ADR-012 for why standard RDS was chosen over Aurora.
 - `manage_master_user_password = true` — AWS manages the master credential in Secrets Manager, encrypted with the platform CMK. No password ever appears in Terraform state.
-- `enable_http_endpoint = true` (default) — enables the RDS Data API, required by `infra/scripts/setup-db-user.sh` to CREATE the `platform_app` IAM-auth user via `aws rds-data execute-statement` without needing VPC connectivity.
 - `iam_database_authentication_enabled = true` — the app connects as `platform_app` using an IAM-generated token; no password.
-- After `terraform apply`, run the one-time user bootstrap: `bash infra/scripts/setup-db-user.sh infra/envs/dev`
+- `publicly_accessible = false` — defence-in-depth on top of private subnet isolation and security groups.
+- `rds-db:connect` IAM ARN format: `arn:aws:rds-db:{region}:{account}:dbuser:{DbiResourceId}/{username}` where `DbiResourceId` = `aws_db_instance.postgres.resource_id` (format `db-XXXXX`). Sourced via `module.data.db_resource_id`.
+- After `terraform apply`, run the one-time user bootstrap — **requires VPC network access to the RDS instance** (port 5432). See `infra/scripts/setup-db-user.sh` for the psql-based approach and network access options.
 
 ### Terraform tests
 

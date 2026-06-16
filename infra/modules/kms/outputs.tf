@@ -1,5 +1,5 @@
 output "kms_key_arn" {
-  description = "ARN of the platform CMK. Pass to the data module (Aurora + Secrets Manager) and to the IAM module for scoping KMS permissions."
+  description = "ARN of the platform CMK. Pass to the data module (RDS + Secrets Manager) and to the IAM module for scoping KMS permissions."
   value       = aws_kms_key.platform.arn
 }
 

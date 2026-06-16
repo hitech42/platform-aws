@@ -15,13 +15,13 @@
 #
 # module.kms     → override_module: mock provider returns non-ARN strings for
 #                  kms_key_arn (e.g. "9q3cpkep"), which fails kms_key_id
-#                  validation on aws_rds_cluster.  A valid fake ARN unblocks
+#                  validation on aws_db_instance.  A valid fake ARN unblocks
 #                  module.data and aws_iam_role_policy.ecs_task.
 #
 # module.data    → override_module: the mock provider returns an empty list for
 #                  master_user_secret (AWS only populates it post-provisioning),
 #                  causing master_user_secret[0] to panic.  Known fake values
-#                  also give deterministic cluster_resource_id for assertions.
+#                  also give deterministic db_resource_id for assertions.
 #
 # aws_sns_topic.billing_alarm
 #                → override_resource: mock-generated arn ("wr16sars") fails
@@ -102,14 +102,13 @@ run "valid_environment_accepted" {
   override_module {
     target = module.data
     outputs = {
-      cluster_endpoint        = "test-dev-aurora.cluster-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      cluster_reader_endpoint = "test-dev-aurora.cluster-ro-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      cluster_resource_id     = "cluster-AAAAAAAAAAAAAAAAAAAAA"
-      cluster_arn             = "arn:aws:rds:us-east-1:123456789012:cluster:test-dev-aurora"
-      port                    = 5432
-      database_name           = "platform"
-      db_username             = "platform_app"
-      master_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      port              = 5432
+      database_name     = "platform"
+      db_username       = "platform_app"
+      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -126,11 +125,11 @@ run "valid_environment_accepted" {
   }
 }
 
-# ── ECS task policy: rds-db:connect must be scoped to one cluster + user ──────
+# ── ECS task policy: rds-db:connect must be scoped to one instance + user ─────
 #
 # rds-db:connect on Resource="*" would allow the app to authenticate as any
-# username against any Aurora cluster in the account.  The ARN must be scoped
-# to this environment's cluster resource ID and the specific app DB username.
+# username against any RDS instance in the account.  The ARN must be scoped
+# to this environment's instance resource ID and the specific app DB username.
 
 run "ecs_task_policy_rds_scoped" {
   command = apply
@@ -171,14 +170,13 @@ run "ecs_task_policy_rds_scoped" {
   override_module {
     target = module.data
     outputs = {
-      cluster_endpoint        = "test-dev-aurora.cluster-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      cluster_reader_endpoint = "test-dev-aurora.cluster-ro-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      cluster_resource_id     = "cluster-AAAAAAAAAAAAAAAAAAAAA"
-      cluster_arn             = "arn:aws:rds:us-east-1:123456789012:cluster:test-dev-aurora"
-      port                    = 5432
-      database_name           = "platform"
-      db_username             = "platform_app"
-      master_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      port              = 5432
+      database_name     = "platform"
+      db_username       = "platform_app"
+      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -195,7 +193,7 @@ run "ecs_task_policy_rds_scoped" {
       for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
       contains(tolist(s.Action), "rds-db:connect") && tostring(s.Resource) == "*"
     ])
-    error_message = "rds-db:connect must never be granted on Resource='*'. Scope to the exact Aurora cluster resource ID ARN."
+    error_message = "rds-db:connect must never be granted on Resource='*'. Scope to the exact RDS instance resource ID ARN."
   }
 
   # The resource ARN must end with the app DB username so the grant is user-specific.
@@ -209,20 +207,20 @@ run "ecs_task_policy_rds_scoped" {
     error_message = "rds-db:connect Resource must end with '/${var.db_username}' to scope the grant to the app DB user only, not the postgres master user."
   }
 
-  # The resource ARN must embed the cluster resource ID — not a wildcard cluster.
+  # The resource ARN must embed the instance resource ID — not a wildcard instance.
   assert {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
       contains(tolist(s.Action), "rds-db:connect") &&
-      can(regex("dbuser:cluster-", tostring(s.Resource)))
+      can(regex("dbuser:db-", tostring(s.Resource)))
     ])
-    error_message = "rds-db:connect Resource must contain 'dbuser:cluster-<resource_id>' to identify the specific Aurora cluster."
+    error_message = "rds-db:connect Resource must contain 'dbuser:db-<resource_id>' to identify the specific RDS instance."
   }
 }
 
-# ── ECS task policy: Secrets Manager must not expose the Aurora master cred ───
+# ── ECS task policy: Secrets Manager must not expose the RDS master cred ──────
 #
-# The Aurora master credential lives in the rds!* Secrets Manager namespace
+# The RDS master credential lives in the rds!* Secrets Manager namespace
 # (AWS-managed, outside the platform/* app namespace).  The app authenticates
 # via IAM token and must NEVER receive GetSecretValue on rds!* — that would
 # give it the admin password with no per-access audit trail.
@@ -266,14 +264,13 @@ run "ecs_task_policy_secrets_scoped" {
   override_module {
     target = module.data
     outputs = {
-      cluster_endpoint        = "test-dev-aurora.cluster-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      cluster_reader_endpoint = "test-dev-aurora.cluster-ro-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      cluster_resource_id     = "cluster-AAAAAAAAAAAAAAAAAAAAA"
-      cluster_arn             = "arn:aws:rds:us-east-1:123456789012:cluster:test-dev-aurora"
-      port                    = 5432
-      database_name           = "platform"
-      db_username             = "platform_app"
-      master_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!cluster-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      port              = 5432
+      database_name     = "platform"
+      db_username       = "platform_app"
+      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -304,13 +301,13 @@ run "ecs_task_policy_secrets_scoped" {
     error_message = "secretsmanager:GetSecretValue must be scoped to the platform/* namespace."
   }
 
-  # GetSecretValue must NOT cover the Aurora master credential (rds!* namespace).
+  # GetSecretValue must NOT cover the RDS master credential (rds!* namespace).
   assert {
     condition = !anytrue([
       for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
       contains(tolist(s.Action), "secretsmanager:GetSecretValue") &&
       can(regex("secret:rds!", tostring(s.Resource)))
     ])
-    error_message = "secretsmanager:GetSecretValue must NOT be granted on rds!* secrets. The app never reads the Aurora master credential."
+    error_message = "secretsmanager:GetSecretValue must NOT be granted on rds!* secrets. The app never reads the RDS master credential."
   }
 }

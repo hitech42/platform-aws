@@ -29,7 +29,7 @@ variable "public_subnet_cidrs" {
 }
 
 variable "private_subnet_cidrs" {
-  description = "List of exactly 2 CIDR blocks for private subnets (one per AZ). Used by Aurora; no NAT Gateway, so no outbound internet from here."
+  description = "List of exactly 2 CIDR blocks for private subnets (one per AZ). Used by RDS; no NAT Gateway, so no outbound internet from here."
   type        = list(string)
   default     = ["10.0.2.0/24", "10.0.3.0/24"]
   validation {

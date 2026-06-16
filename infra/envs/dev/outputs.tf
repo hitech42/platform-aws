@@ -11,22 +11,22 @@ output "public_subnet_ids" {
 }
 
 output "private_subnet_ids" {
-  description = "IDs of the two private subnets (Aurora)."
+  description = "IDs of the two private subnets (RDS PostgreSQL)."
   value       = module.network.private_subnet_ids
 }
 
 output "alb_sg_id" {
-  description = "ALB security group ID — referenced when creating the ALB listener in E2."
+  description = "ALB security group ID — referenced when creating the ALB listener in E3."
   value       = module.network.alb_sg_id
 }
 
 output "ecs_service_sg_id" {
-  description = "ECS service security group ID — referenced in the ECS service definition in E2."
+  description = "ECS service security group ID — referenced in the ECS service definition in E3."
   value       = module.network.ecs_service_sg_id
 }
 
 output "db_sg_id" {
-  description = "DB security group ID — referenced when creating the Aurora cluster in E3."
+  description = "DB security group ID — referenced when creating the RDS instance."
   value       = module.network.db_sg_id
 }
 
@@ -38,7 +38,7 @@ output "github_actions_role_arn" {
 }
 
 output "ecs_task_execution_role_arn" {
-  description = "ARN for the ECS task definition's executionRoleArn (E2)."
+  description = "ARN for the ECS task definition's executionRoleArn (E3)."
   value       = module.iam.ecs_task_execution_role_arn
 }
 
@@ -59,35 +59,35 @@ output "kms_alias_arn" {
   value       = module.kms.kms_alias_arn
 }
 
-# ── Aurora ────────────────────────────────────────────────────────────────────
+# ── RDS PostgreSQL ────────────────────────────────────────────────────────────
 
-output "aurora_cluster_endpoint" {
-  description = "Writer endpoint for DATABASE_URL (read-write connections). Passed to the ECS task definition in E3."
-  value       = module.data.cluster_endpoint
+output "db_endpoint" {
+  description = "Hostname of the RDS PostgreSQL instance. Used in DATABASE_URL (combine with db_port). Passed to the ECS task definition in E3."
+  value       = module.data.db_endpoint
 }
 
-output "aurora_cluster_reader_endpoint" {
-  description = "Reader endpoint for read-only query routing (future use)."
-  value       = module.data.cluster_reader_endpoint
+output "db_port" {
+  description = "Database port (5432). Used when constructing DATABASE_URL and psql connections."
+  value       = module.data.port
 }
 
-output "aurora_cluster_resource_id" {
-  description = "Aurora cluster resource ID (cluster-XXXX). Used in the rds-db:connect IAM permission ARN and in DATABASE_URL for IAM auth token generation."
-  value       = module.data.cluster_resource_id
+output "db_resource_id" {
+  description = "RDS instance resource ID (db-XXXX). Used in the rds-db:connect IAM permission ARN and in DATABASE_URL for IAM auth token generation."
+  value       = module.data.db_resource_id
 }
 
-output "aurora_cluster_arn" {
-  description = "ARN of the Aurora cluster. Required by infra/scripts/setup-db-user.sh (aws rds-data execute-statement)."
-  value       = module.data.cluster_arn
+output "db_arn" {
+  description = "ARN of the RDS PostgreSQL instance."
+  value       = module.data.db_arn
 }
 
-output "aurora_database_name" {
-  description = "Default database name in the Aurora cluster."
+output "database_name" {
+  description = "Default database name in the RDS instance."
   value       = module.data.database_name
 }
 
-output "aurora_master_secret_arn" {
-  description = "ARN of the Aurora-managed master credential secret (rds!* namespace). For break-glass/DBA access only — the app never reads this."
+output "master_secret_arn" {
+  description = "ARN of the RDS-managed master credential secret (rds!* namespace). For break-glass/DBA access only — the app never reads this."
   value       = module.data.master_secret_arn
 }
 
@@ -106,6 +106,6 @@ output "billing_alarm_topic_arn" {
 # ── Convenience for scripts ───────────────────────────────────────────────────
 
 output "aws_region" {
-  description = "AWS region for this environment. Used by infra/scripts/setup-db-user.sh as a fallback."
+  description = "AWS region for this environment. Used by infra/scripts/setup-db-user.sh."
   value       = var.aws_region
 }

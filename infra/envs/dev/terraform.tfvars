@@ -20,7 +20,7 @@ allowed_refs = ["refs/heads/develop"]
 
 # From bootstrap outputs — fill in after running `terraform apply` in infra/bootstrap/.
 # Must also be copied into backend.tf (backend config does not support variables).
-state_bucket_name = "cvs-platform-tfstate-us-east-1-9f42b451"
+state_bucket_name = "cvs-platform-tfstate-us-east-1-cae3b4ba"
 
 # ── Database (module defaults match these values; explicit for clarity) ────────
 db_name     = "platform"
@@ -28,7 +28,7 @@ db_username = "platform_app"
 
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 # Alert fires when estimated AWS charges exceed this USD amount per day.
-# Set this BEFORE applying any billable resources (KMS key, Aurora cluster).
+# Set this BEFORE applying any billable resources (KMS key, RDS instance).
 # Subscribe your email after first apply:
 #   aws sns subscribe \
 #     --topic-arn $(terraform -chdir=infra/envs/dev output -raw billing_alarm_topic_arn) \

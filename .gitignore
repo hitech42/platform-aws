@@ -65,6 +65,9 @@ app/src/db/migrations/versions/*.pyc
 infra/bootstrap/env.tf
 infra/bootstrap/terraform.tfvars
 infra/bootstrap/out
+infra/envs/dev/out
+infra/envs/staging/out
+infra/envs/prod/out
 crash.log
 crash.*.log
 override.tf

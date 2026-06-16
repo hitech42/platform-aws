@@ -56,7 +56,7 @@ run "public_subnets_assign_public_ip" {
 
   assert {
     condition     = alltrue([for s in aws_subnet.private : s.map_public_ip_on_launch == false])
-    error_message = "Private subnets must not assign public IPs (Aurora does not need them)."
+    error_message = "Private subnets must not assign public IPs (RDS does not need them)."
   }
 }
 
