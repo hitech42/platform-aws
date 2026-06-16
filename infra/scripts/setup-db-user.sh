@@ -76,6 +76,19 @@ psql \
   --dbname="${DB_NAME}" \
   --command="GRANT rds_iam TO ${DB_USERNAME};"
 
+# ── Step 3: grant schema privileges (idempotent) ──────────────────────────────
+# PostgreSQL 15+ no longer grants CREATE on the public schema to PUBLIC by
+# default — only the schema owner (the master user) has it. Without this,
+# Alembic's first migration fails with "permission denied for schema public"
+# when it tries to CREATE TABLE alembic_version.
+echo "==> Granting schema privileges on 'public' to '${DB_USERNAME}' ..."
+psql \
+  --host="${DB_HOST}" \
+  --port="${DB_PORT}" \
+  --username="${PGMASTER}" \
+  --dbname="${DB_NAME}" \
+  --command="GRANT CREATE, USAGE ON SCHEMA public TO ${DB_USERNAME};"
+
 unset PGPASSWORD
 
 echo ""

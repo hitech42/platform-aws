@@ -244,22 +244,27 @@ kms_key_arn                 = "arn:aws:kms:us-east-1:...:key/..."
 
 ### Step 5 — Bootstrap the IAM database user (one-time, after first apply)
 
-After the Aurora cluster is running, create the application Postgres user and grant it
-the `rds_iam` role so the app can authenticate via IAM token (no password ever set).
+After the RDS instance is running, create the application Postgres user, grant it the
+`rds_iam` role so the app can authenticate via IAM token (no password ever set), and grant
+it `CREATE`/`USAGE` on the `public` schema (PostgreSQL 15+ no longer grants this to `PUBLIC`
+by default — without it, Alembic's first migration fails with "permission denied for schema
+public").
 
-This uses the **RDS Data API** — no bastion host or VPC access required, just AWS credentials.
+Standard RDS (unlike Aurora) has no Data API, so this connects via `psql` and **requires TCP
+access to port 5432 from within the VPC** — an EC2 bastion, SSM port forwarding, or a one-off
+ECS Fargate task in the same VPC.
 
 ```bash
-# From the repo root:
+# From the repo root, run from a host with VPC network access:
 bash infra/scripts/setup-db-user.sh
 ```
 
-The script reads Terraform outputs automatically (cluster ARN, master secret ARN, db name, username).
+The script reads Terraform outputs automatically (db endpoint, master secret ARN, db name, username).
 
-**Prerequisites**: `aws` CLI ≥ 2.x; IAM permissions `rds-data:ExecuteStatement` and
-`secretsmanager:GetSecretValue` on the cluster and master secret ARNs.
+**Prerequisites**: `aws` CLI ≥ 2.x, `psql`, `jq`; IAM permission `secretsmanager:GetSecretValue`
+on the master secret ARN (`rds!*` namespace).
 
-Re-run this script if the Aurora cluster is ever destroyed and recreated. It is idempotent —
+Re-run this script if the RDS instance is ever destroyed and recreated. It is idempotent —
 running it when the user already exists is safe.
 
 ### Running Terraform tests (no AWS credentials needed)
