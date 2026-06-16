@@ -1,6 +1,6 @@
 # Developer Self-Service Platform API
 
-An internal FastAPI service that lets dev teams self-serve platform requests — starting with requesting and managing application secrets in AWS Secrets Manager — with a full audit trail stored in Postgres. Built for deployment on ECS Fargate + Aurora Serverless v2, with LocalStack for local AWS emulation.
+An internal FastAPI service that lets dev teams self-serve platform requests — starting with requesting and managing application secrets in AWS Secrets Manager — with a full audit trail stored in Postgres. Built for deployment on ECS Fargate + RDS PostgreSQL (db.t4g.micro), with LocalStack for local AWS emulation.
 
 ## Status
 
@@ -217,10 +217,9 @@ terraform plan
 **What to look for in the plan output:**
 
 - `Plan: N to add, 0 to change, 0 to destroy` — no unexpected destroys.
-- Resources in the E1 plan include: `aws_vpc`, 2× `aws_subnet` (public), 2× `aws_subnet` (private), `aws_internet_gateway`, 2× `aws_route_table`, 4× `aws_route_table_association`, 3× `aws_security_group`, `aws_iam_openid_connect_provider` (if `create_oidc_provider = true`), 3× `aws_iam_role`, 1× `aws_iam_role_policy`.
-- Resources added in E2 (this layer): `aws_kms_key`, `aws_kms_alias`, `aws_db_subnet_group`, `aws_rds_cluster`, `aws_rds_cluster_instance`, 1× `aws_iam_role_policy` (ECS task), `aws_sns_topic`, `aws_cloudwatch_metric_alarm`.
+- Expected resource types: VPC (subnets, IGW, route tables, security groups), IAM (OIDC provider, roles, policies), KMS key + alias, RDS PostgreSQL instance + subnet group, ECS cluster + service + task definition, ECR repository, ALB + listener + target group, CloudWatch log group, SNS billing alarm.
 
-> **Cost notice**: The KMS key ($1/month) and Aurora cluster (~$22/month at 0.5 ACU idle) begin accruing cost from the moment of apply, even with zero traffic. Set up a CloudWatch billing alarm (included in this plan) before applying. See Step 5 below.
+> **Cost notice**: The KMS key ($1/month), RDS db.t4g.micro instance (~$14/month after the 12-month free tier), and ALB (~$16/month at baseline) begin accruing cost from the moment of apply, even with zero traffic. A CloudWatch billing alarm is included in this plan.
 
 ### Step 4 — Apply (manual, after reviewing the plan)
 
@@ -228,18 +227,21 @@ terraform plan
 terraform apply
 ```
 
-After apply, note the key outputs for E3 (ECS/ALB):
+After apply, note these key outputs:
 
 ```
 vpc_id                      = "vpc-..."
 public_subnet_ids           = ["subnet-...", "subnet-..."]
-ecs_service_sg_id           = "sg-..."
 github_actions_role_arn     = "arn:aws:iam::...:role/cvs-platform-dev-github-deploy"
 ecs_task_execution_role_arn = "arn:aws:iam::...:role/cvs-platform-dev-ecs-task-execution"
 ecs_task_role_arn           = "arn:aws:iam::...:role/cvs-platform-dev-ecs-task"
-aurora_cluster_endpoint     = "cvs-platform-dev-aurora.cluster-xxxx.us-east-1.rds.amazonaws.com"
-aurora_cluster_resource_id  = "cluster-XXXXXXXXXXXXXXXXXXXXXXXX"
+db_endpoint                 = "cvs-platform-dev.xxxx.us-east-1.rds.amazonaws.com"
+db_resource_id              = "db-XXXXX"
 kms_key_arn                 = "arn:aws:kms:us-east-1:...:key/..."
+ecr_repository_url          = "123456789012.dkr.ecr.us-east-1.amazonaws.com/cvs-platform-dev"
+ecs_cluster_name            = "cvs-platform-dev"
+ecs_service_name            = "cvs-platform-dev"
+alb_dns_name                = "cvs-platform-dev-alb-xxxx.us-east-1.elb.amazonaws.com"
 ```
 
 ### Step 5 — Bootstrap the IAM database user (one-time, after first apply)

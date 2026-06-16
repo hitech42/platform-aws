@@ -318,10 +318,10 @@ The GitHub Actions deploy role (`{project_name}-{environment}-github-deploy`) is
 
 | Session | Permissions added |
 |---|---|
-| E1 | S3 (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
+| E1 (done) | S3 (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
 | E2 (done) | RDS instance/subnet-group/snapshot (project-scoped ARNs), KMS CreateKey + alias + grant management, Secrets Manager platform/* + rds!* |
-| E3 | ECS, ECR, ALB |
-| E4 | CloudWatch Logs/metrics |
+| E3 (done) | ECS, ECR, ALB |
+| E4 (done) | CloudWatch Logs/metrics |
 
 `ec2:Describe*` and VPC-mutate actions use `Resource: "*"` because EC2 does not support resource-level ARNs for Describe operations, and tag-based conditions require the resources to exist before the policy can reference them. Add tag-based conditions in staging/prod once VPC IDs are known (see TODO in `infra/modules/iam/main.tf`).
 
