@@ -448,6 +448,36 @@ resource "aws_iam_role_policy" "github_deploy" {
         # Service ARN format: arn:aws:ecs:REGION:ACCOUNT:service/CLUSTER/SERVICE
         Resource = "arn:aws:ecs:*:*:service/${var.project_name}-*/${var.project_name}-*"
       },
+      # The deploy pipeline runs `alembic upgrade head` as a one-off Fargate
+      # task before updating the service (app-deploy.yml). RunTask is scoped
+      # to this project's task definition family and, via the ecs:cluster
+      # condition, to this project's cluster — it cannot launch arbitrary task
+      # definitions or run tasks in unrelated clusters.
+      {
+        Sid    = "ECSRunTask"
+        Effect = "Allow"
+        Action = ["ecs:RunTask"]
+        Resource = [
+          "arn:aws:ecs:*:*:task-definition/${var.project_name}-*",
+          "arn:aws:ecs:*:*:task-definition/${var.project_name}-*:*",
+        ]
+        Condition = {
+          ArnLike = {
+            "ecs:cluster" = "arn:aws:ecs:*:*:cluster/${var.project_name}-*"
+          }
+        }
+      },
+      # Task ARNs are only known after RunTask returns, so DescribeTasks/StopTask
+      # are scoped to the cluster-name component instead of a specific task ID.
+      {
+        Sid    = "ECSTaskRuntime"
+        Effect = "Allow"
+        Action = [
+          "ecs:DescribeTasks",
+          "ecs:StopTask",
+        ]
+        Resource = "arn:aws:ecs:*:*:task/${var.project_name}-*/*"
+      },
 
       # ── 10. ALB — load balancer, target group, listener ────────────────────
       #
