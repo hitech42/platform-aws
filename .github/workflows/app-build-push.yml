@@ -19,6 +19,7 @@ jobs:
   build-and-push:
     name: Build & push to ECR
     runs-on: ubuntu-latest
+    environment: dev # AWS_DEPLOY_ROLE_ARN is an environment-scoped variable, not a repo-level one
     permissions:
       id-token: write  # required for OIDC token exchange
       contents: read
@@ -32,8 +33,11 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Set AWS_DEPLOY_ROLE_ARN as a GitHub Actions repository variable
-          # after the first `terraform apply`.  Value: module.iam.github_actions_role_arn
+          # Set AWS_DEPLOY_ROLE_ARN as a variable on the "dev" GitHub Actions
+          # environment (Settings > Environments > dev > Variables) after the
+          # first `terraform apply`.  Value: module.iam.github_actions_role_arn
+          # Must be environment-scoped, not repo-level — this job declares
+          # environment: dev above so it can read it.
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
