@@ -215,11 +215,26 @@ resource "aws_iam_role_policy" "github_deploy" {
           "iam:AttachRolePolicy",
           "iam:DetachRolePolicy",
           "iam:ListAttachedRolePolicies",
-          # PassRole needed when Terraform registers ECS task definitions and
-          # passes the task execution / task roles to the ECS service (E3).
-          "iam:PassRole",
         ]
         Resource = "arn:aws:iam::*:role/${var.project_name}-*"
+      },
+      # PassRole is in a separate statement so it can carry a PassedToService
+      # condition — the role can only be passed to ECS tasks, not arbitrary
+      # services.  Scoped to exactly the task execution and task role name
+      # patterns; does not cover the deploy role itself.
+      {
+        Sid    = "ECSPassRole"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          "arn:aws:iam::*:role/${var.project_name}-*-ecs-task-execution",
+          "arn:aws:iam::*:role/${var.project_name}-*-ecs-task",
+        ]
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "ecs-tasks.amazonaws.com"
+          }
+        }
       },
 
       # ── 5. RDS — instance and subnet group ───────────────────────────────────
@@ -338,17 +353,168 @@ resource "aws_iam_role_policy" "github_deploy" {
         Resource = "*" # ListSecrets does not support resource-level permissions
       },
 
-      # TODO (E3): add when wiring up ECS + ECR + ALB:
-      #   ecr:GetAuthorizationToken (Resource="*" — account-level, no ARN),
-      #   ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer,
-      #   ecr:BatchGetImage, ecr:DescribeRepositories, ecr:CreateRepository,
-      #   ecr:DeleteRepository, ecr:TagResource on specific ECR repo ARN,
-      #   ecs:CreateCluster, ecs:DeleteCluster, ecs:RegisterTaskDefinition,
-      #   ecs:DeregisterTaskDefinition, ecs:CreateService, ecs:DeleteService,
-      #   ecs:UpdateService, ecs:Describe* on project-prefixed cluster/service ARNs,
-      #   elasticloadbalancing:* scoped to project-prefixed ALB/listener/TG ARNs,
-      #   logs:CreateLogGroup, logs:DeleteLogGroup, logs:DescribeLogGroups,
-      #   logs:PutRetentionPolicy, logs:TagLogGroup
+      # ── 8. ECR — repository management + image push ───────────────────────
+      #
+      # ecr:GetAuthorizationToken has no resource ARN concept — it returns a
+      # registry-level token valid for any repo in the account.  AWS requires
+      # Resource="*" for this action; it carries no mutating capability.
+      {
+        Sid      = "ECRAuthToken"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRManage"
+        Effect = "Allow"
+        Action = [
+          # Terraform lifecycle
+          "ecr:CreateRepository",
+          "ecr:DeleteRepository",
+          "ecr:DescribeRepositories",
+          "ecr:TagResource",
+          "ecr:UntagResource",
+          "ecr:ListTagsForResource",
+          "ecr:SetRepositoryPolicy",
+          "ecr:GetRepositoryPolicy",
+          "ecr:DeleteRepositoryPolicy",
+          "ecr:GetLifecyclePolicy",
+          "ecr:PutLifecyclePolicy",
+          "ecr:DeleteLifecyclePolicy",
+          "ecr:PutImageScanningConfiguration",
+          "ecr:PutEncryptionConfiguration",
+          # CI/CD image push
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+          # CI/CD image pull (also used by task execution role — separate policy)
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:DescribeImages",
+          "ecr:ListImages",
+          "ecr:BatchDeleteImage",
+        ]
+        # Scoped to the single project repository; name matches var.project_name.
+        Resource = "arn:aws:ecr:*:*:repository/${var.project_name}"
+      },
+
+      # ── 9. ECS — cluster, service, task definition lifecycle ─────────────
+      #
+      # Task definition ARNs include a revision number unknown until registration,
+      # so RegisterTaskDefinition / DescribeTaskDefinition must use Resource="*".
+      # Cluster and service ARNs use the project-name prefix for scoping.
+      {
+        Sid    = "ECSTaskDefinitions"
+        Effect = "Allow"
+        Action = [
+          "ecs:RegisterTaskDefinition",
+          "ecs:DeregisterTaskDefinition",
+          "ecs:DescribeTaskDefinition",
+          "ecs:ListTaskDefinitions",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECSClusterManage"
+        Effect = "Allow"
+        Action = [
+          "ecs:CreateCluster",
+          "ecs:DeleteCluster",
+          "ecs:UpdateClusterSettings",
+          "ecs:DescribeClusters",
+          "ecs:ListClusters",
+          "ecs:TagResource",
+          "ecs:UntagResource",
+          "ecs:ListTagsForResource",
+        ]
+        Resource = "arn:aws:ecs:*:*:cluster/${var.project_name}-*"
+      },
+      {
+        Sid    = "ECSServiceManage"
+        Effect = "Allow"
+        Action = [
+          "ecs:CreateService",
+          "ecs:DeleteService",
+          "ecs:UpdateService",
+          "ecs:DescribeServices",
+          "ecs:ListServices",
+        ]
+        # Service ARN format: arn:aws:ecs:REGION:ACCOUNT:service/CLUSTER/SERVICE
+        Resource = "arn:aws:ecs:*:*:service/${var.project_name}-*/${var.project_name}-*"
+      },
+
+      # ── 10. ALB — load balancer, target group, listener ────────────────────
+      #
+      # Describe* actions require Resource="*" (AWS limitation — no ARN concept
+      # for list/describe calls on ELB resources).  Mutating actions are scoped
+      # to project-prefixed resource ARNs.
+      {
+        Sid      = "ALBDescribeGlobal"
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:Describe*"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ALBManage"
+        Effect = "Allow"
+        Action = [
+          # Load balancer lifecycle
+          "elasticloadbalancing:CreateLoadBalancer",
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:SetSecurityGroups",
+          "elasticloadbalancing:SetSubnets",
+          # Target group lifecycle
+          "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroupAttributes",
+          "elasticloadbalancing:RegisterTargets",
+          "elasticloadbalancing:DeregisterTargets",
+          # Listener lifecycle
+          "elasticloadbalancing:CreateListener",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:ModifyListener",
+          # Tags
+          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:RemoveTags",
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/${var.project_name}-*/*",
+          "arn:aws:elasticloadbalancing:*:*:targetgroup/${var.project_name}-*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener/app/${var.project_name}-*/*/*",
+        ]
+      },
+
+      # ── 11. CloudWatch Logs — ECS log group management ─────────────────────
+      #
+      # logs:DescribeLogGroups requires Resource="*" (AWS limitation).
+      # Mutating actions are scoped to the /ecs/{project_name}-* log group prefix.
+      {
+        Sid      = "CWLogsDescribeGlobal"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CWLogsManage"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:DeleteLogGroup",
+          "logs:PutRetentionPolicy",
+          "logs:TagLogGroup",
+          "logs:TagResource",
+          "logs:UntagResource",
+          "logs:ListTagsLogGroup",
+          "logs:ListTagsForResource",
+          "logs:AssociateKmsKey",
+          "logs:DisassociateKmsKey",
+        ]
+        Resource = "arn:aws:logs:*:*:log-group:/ecs/${var.project_name}-*"
+      },
 
       # TODO (E4): add for CloudWatch metrics + alarms + billing notifications:
       #   cloudwatch:PutMetricAlarm, cloudwatch:DeleteAlarms,
@@ -390,12 +556,10 @@ resource "aws_iam_role" "ecs_task_execution" {
 
   tags = merge(local.tags, { Name = "${local.prefix}-ecs-task-execution" })
 
-  # TODO (E3): attach inline policies for:
-  #   - ecr:GetAuthorizationToken on * (required — no resource ARN for auth token)
-  #   - ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer,
-  #     ecr:BatchGetImage on the specific ECR repository ARN
-  #   - logs:CreateLogStream, logs:PutLogEvents on the specific log group ARN
-  #   - secretsmanager:GetSecretValue on specific secret ARNs (env var injection)
+  # Inline policies for this role are attached in infra/envs/dev/main.tf as
+  # aws_iam_role_policy.ecs_task_execution — they need the ECR repo ARN and
+  # CloudWatch log group ARN from the ecs-service module, which would create a
+  # dependency cycle if placed here.  The same pattern is used for ecs_task.
 }
 
 # ── ECS task role ─────────────────────────────────────────────────────────────

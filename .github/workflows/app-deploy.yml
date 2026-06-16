@@ -1,0 +1,185 @@
+name: App - Deploy to ECS
+
+# Triggered automatically after a successful build-push run on develop, or
+# manually with an explicit ECR image URI for out-of-band deploys and rollbacks.
+on:
+  workflow_run:
+    workflows: ["App - Build & Push"]
+    types: [completed]
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      image_uri:
+        description: "Full ECR image URI to deploy (e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/cvs-platform:abc1234)"
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: cvs-platform
+  ECS_CLUSTER: cvs-platform-dev
+  ECS_SERVICE: cvs-platform-dev
+  TASK_FAMILY: cvs-platform-dev
+  CONTAINER_NAME: cvs-platform
+
+jobs:
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── Resolve image URI ────────────────────────────────────────────────────
+      # workflow_run: derive URI from the triggering workflow's commit SHA and
+      #               the ECR repository URL (no artifact download needed).
+      # workflow_dispatch: use the caller-supplied URI directly (rollback path).
+      - name: Resolve image URI
+        id: image
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            IMAGE_URI="${{ inputs.image_uri }}"
+          else
+            REGISTRY=$(aws ecr describe-repositories \
+              --repository-names "${ECR_REPOSITORY}" \
+              --query 'repositories[0].repositoryUri' \
+              --output text)
+            IMAGE_URI="${REGISTRY}:${{ github.event.workflow_run.head_sha }}"
+          fi
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: ${IMAGE_URI}"
+
+      # ── Register new task definition revision ────────────────────────────────
+      # Fetch the current task definition, swap in the new image, strip fields
+      # that are managed by AWS (not re-submittable), register a new revision.
+      # Terraform owns the infrastructure shape; CI/CD owns the image version.
+      - name: Register new task definition revision
+        id: task-def
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${TASK_FAMILY}" \
+            --query 'taskDefinition' \
+            --output json \
+            | jq \
+                --arg IMAGE "${{ steps.image.outputs.image_uri }}" \
+                --arg NAME  "${CONTAINER_NAME}" \
+                'del(
+                   .taskDefinitionArn, .revision, .status,
+                   .requiresAttributes, .placementConstraints,
+                   .compatibilities, .registeredAt, .registeredBy
+                 )
+                 | .containerDefinitions |=
+                     map(if .name == $NAME then .image = $IMAGE else . end)' \
+            > /tmp/task-def.json
+
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_def_arn=${NEW_ARN}" >> "$GITHUB_OUTPUT"
+          echo "Registered: ${NEW_ARN}"
+
+      # ── Run database migrations ──────────────────────────────────────────────
+      # Runs `alembic upgrade head` as a one-off Fargate task using the NEW
+      # task definition (so migrations always run against the code being deployed).
+      # Network config is derived from the live ECS service — no hardcoded IDs.
+      #
+      # NOTE: migrations must be forward-compatible with the currently-running
+      # service version (zero-downtime migration practice) because the old tasks
+      # continue serving traffic until the rolling deploy completes.
+      - name: Run database migrations
+        run: |
+          NETWORK_JSON=$(aws ecs describe-services \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}" \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration' \
+            --output json)
+          SUBNETS=$(echo "${NETWORK_JSON}"         | jq -r '.subnets        | join(",")')
+          SECURITY_GROUPS=$(echo "${NETWORK_JSON}" | jq -r '.securityGroups | join(",")')
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "${ECS_CLUSTER}" \
+            --task-definition "${{ steps.task-def.outputs.task_def_arn }}" \
+            --launch-type FARGATE \
+            --network-configuration \
+              "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SECURITY_GROUPS}],assignPublicIp=ENABLED}" \
+            --overrides \
+              "{\"containerOverrides\":[{\"name\":\"${CONTAINER_NAME}\",\"command\":[\"alembic\",\"-c\",\"/project/app/alembic.ini\",\"upgrade\",\"head\"]}]}" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task: ${TASK_ARN}"
+          aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${TASK_ARN}"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "${ECS_CLUSTER}" \
+            --tasks "${TASK_ARN}" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [[ "${EXIT_CODE}" != "0" ]]; then
+            echo "Migration task exited with code ${EXIT_CODE} — aborting deploy."
+            exit 1
+          fi
+          echo "Migrations applied successfully."
+
+      # ── Update ECS service ───────────────────────────────────────────────────
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service  "${ECS_SERVICE}" \
+            --task-definition "${{ steps.task-def.outputs.task_def_arn }}"
+          echo "Service updated to ${{ steps.task-def.outputs.task_def_arn }}"
+
+      # ── Wait for steady state ────────────────────────────────────────────────
+      # Default timeout: ~10 min (100 polls × 6 s).  Fargate cold-starts plus
+      # the ALB health-check grace period (startPeriod=60 s) typically finish
+      # in under 3 minutes.
+      - name: Wait for service stability
+        run: |
+          echo "Waiting for service to reach steady state..."
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
+
+      # ── Smoke test ───────────────────────────────────────────────────────────
+      # ALB DNS is derived live so no variable needs to be configured after
+      # terraform apply.  /healthz and /readyz are retried to absorb any brief
+      # propagation delay after the ECS wait completes.
+      - name: Smoke test
+        run: |
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "${ECS_CLUSTER}" \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+          BASE_URL="http://${ALB_DNS}"
+          echo "Smoke testing ${BASE_URL} ..."
+
+          for path in /healthz /readyz; do
+            STATUS=""
+            for i in {1..6}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}${path}")
+              if [[ "${STATUS}" == "200" ]]; then
+                echo "  ${path} → 200 OK"
+                break
+              fi
+              echo "  ${path} → ${STATUS} (attempt ${i}/6, retrying in 10s)"
+              sleep 10
+            done
+            [[ "${STATUS}" == "200" ]] || {
+              echo "  ${path} did not return 200 after retries — deploy may have failed"
+              exit 1
+            }
+          done
+
+          echo ""
+          echo "Smoke tests passed. Service URL: ${BASE_URL}/api/v1/"
