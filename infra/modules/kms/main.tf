@@ -8,6 +8,7 @@ terraform {
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 locals {
   prefix = "${var.project_name}-${var.environment}"
@@ -86,6 +87,33 @@ resource "aws_kms_key" "platform" {
           "kms:GenerateDataKey",
         ]
         Resource = "*"
+      },
+      # CloudWatch Logs requires an explicit service-principal grant to use a
+      # customer-managed key for log group encryption — unlike IAM principals,
+      # AWS service principals cannot rely on the RootFullControl statement's
+      # IAM delegation. Without this statement, CreateLogGroup with
+      # kms_key_id set fails with AccessDeniedException. Scoped via encryption
+      # context to this project's log groups only (not all log groups in the
+      # account/region).
+      {
+        Sid    = "CloudWatchLogsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-*"
+          }
+        }
       },
     ]
   })

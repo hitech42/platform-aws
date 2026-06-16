@@ -56,6 +56,14 @@ run "key_policy_principals" {
     }
   }
 
+  override_data {
+    target = data.aws_region.current
+    values = {
+      name        = "us-east-1"
+      description = "US East (N. Virginia)"
+    }
+  }
+
   # Root account must be in the key policy.  Without this the key can never be
   # administered if all IAM policies granting key access are accidentally removed.
   assert {
@@ -96,6 +104,19 @@ run "key_policy_principals" {
       contains(tolist(s.Action), "kms:CreateGrant")
     ])
     error_message = "ECS task role must not have kms:CreateGrant — decrypt-only access is sufficient."
+  }
+
+  # CloudWatch Logs service principal must be granted GenerateDataKey so
+  # CreateLogGroup with kms_key_id set succeeds. Without this statement AWS
+  # rejects log group creation with AccessDeniedException — IAM delegation
+  # via RootFullControl does not substitute for a service-principal grant.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_kms_key.platform.policy).Statement :
+      try(s.Principal.Service == "logs.us-east-1.amazonaws.com", false) &&
+      contains(tolist(s.Action), "kms:GenerateDataKey*")
+    ])
+    error_message = "Key policy must allow logs.<region>.amazonaws.com kms:GenerateDataKey* so CloudWatch Logs can encrypt log groups with this CMK."
   }
 }
 
