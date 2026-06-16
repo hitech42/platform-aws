@@ -259,3 +259,35 @@ run "github_deploy_secrets_scoped" {
     error_message = "secretsmanager:GetSecretValue must never be granted on Resource='*'. Scope to platform/* and rds!* ARNs only."
   }
 }
+
+# ── GitHub deploy policy: ecs:RunTask scoped to project task defs + cluster ──
+#
+# app-deploy.yml runs the Alembic migration as a one-off Fargate task via
+# ecs:RunTask. Without this permission the deploy pipeline fails with
+# AccessDeniedException on the "Run database migrations" step.
+
+run "github_deploy_run_task_scoped" {
+  command = apply
+
+  # ECSRunTask must exist and scope Resource to project-prefixed task
+  # definition ARNs only — never "*".
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "ECSRunTask" &&
+      contains(tolist(s.Action), "ecs:RunTask") &&
+      alltrue([for r in tolist(s.Resource) : startswith(r, "arn:aws:ecs:") && strcontains(r, "task-definition/${var.project_name}-")])
+    ])
+    error_message = "ECSRunTask must exist, grant ecs:RunTask, and scope Resource to arn:aws:ecs:*:*:task-definition/{project_name}-* ARNs only."
+  }
+
+  # The ecs:cluster condition must restrict RunTask to this project's cluster.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "ECSRunTask" &&
+      can(regex("arn:aws:ecs:\\*:\\*:cluster/${var.project_name}-\\*", try(s.Condition.ArnLike["ecs:cluster"], "")))
+    ])
+    error_message = "ECSRunTask must restrict ecs:cluster to arn:aws:ecs:*:*:cluster/{project_name}-* so it cannot run tasks in unrelated clusters."
+  }
+}
