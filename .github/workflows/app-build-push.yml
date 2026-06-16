@@ -1,0 +1,64 @@
+name: App - Build & Push
+
+# Triggered on every push to develop that touches application code, and manually
+# for ad-hoc image builds.  Produces a commit-SHA-tagged ECR image consumed by
+# the deploy workflow.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "app/**"
+      - ".github/workflows/app-build-push.yml"
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: cvs-platform
+
+jobs:
+  build-and-push:
+    name: Build & push to ECR
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # required for OIDC token exchange
+      contents: read
+
+    outputs:
+      image_uri: ${{ steps.push.outputs.image_uri }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Set AWS_DEPLOY_ROLE_ARN as a GitHub Actions repository variable
+          # after the first `terraform apply`.  Value: module.iam.github_actions_role_arn
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push
+        id: push
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="${REGISTRY}/${ECR_REPOSITORY}:${SHA_TAG}"
+
+          # Build context is app/ (Dockerfile at app/Dockerfile).
+          # The commit-SHA tag is the canonical production reference: IMMUTABLE on
+          # ECR, so rolling back means pointing the ECS service at a previous SHA —
+          # the image is guaranteed to be exactly what was built for that commit.
+          docker build \
+            --file app/Dockerfile \
+            --tag "${IMAGE_URI}" \
+            app/
+
+          docker push "${IMAGE_URI}"
+
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+          echo "Pushed: ${IMAGE_URI}"

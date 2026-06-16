@@ -96,6 +96,33 @@ output "db_username" {
   value       = module.data.db_username
 }
 
+# ── ECS / ECR / ALB ──────────────────────────────────────────────────────────
+
+output "ecr_repository_url" {
+  description = "ECR repository URL (without tag). Used by CI/CD: append :<commit-sha> for the immutable production tag."
+  value       = module.ecs_service.ecr_repository_url
+}
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name. Set as ECS_CLUSTER in app-build-push.yml / app-deploy.yml."
+  value       = module.ecs_service.ecs_cluster_name
+}
+
+output "ecs_service_name" {
+  description = "ECS service name. Set as ECS_SERVICE in app-deploy.yml."
+  value       = module.ecs_service.ecs_service_name
+}
+
+output "alb_dns_name" {
+  description = "Public DNS name of the Application Load Balancer. Service base URL: http://{alb_dns_name}/api/v1/"
+  value       = module.ecs_service.alb_dns_name
+}
+
+output "log_group_name" {
+  description = "CloudWatch log group name for ECS tasks (/ecs/cvs-platform-dev)."
+  value       = module.ecs_service.log_group_name
+}
+
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 
 output "billing_alarm_topic_arn" {

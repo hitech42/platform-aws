@@ -154,6 +154,50 @@ run "github_deploy_rds_scoped" {
   }
 }
 
+# ── GitHub deploy policy: PassRole must carry a PassedToService condition ─────
+#
+# iam:PassRole without a condition allows the holder to pass any scoped role to
+# ANY AWS service.  A PassedToService=ecs-tasks.amazonaws.com condition locks
+# it to ECS tasks only — if the condition is missing, the role could be passed
+# to Lambda, EC2, or other services that could then escalate privileges.
+
+run "github_deploy_passrole_scoped" {
+  command = apply
+
+  # iam:PassRole must be in the ECSPassRole statement, not bundled with broad
+  # IAM management actions (which would make the condition absence less visible).
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "ECSPassRole" && contains(tolist(s.Action), "iam:PassRole")
+    ])
+    error_message = "iam:PassRole must be in a dedicated ECSPassRole statement with a PassedToService condition, not bundled with other IAM management actions."
+  }
+
+  # The condition must restrict role-passing to ECS tasks only.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      s.Sid == "ECSPassRole" &&
+      try(s.Condition.StringEquals["iam:PassedToService"], "") == "ecs-tasks.amazonaws.com"
+    ])
+    error_message = "ECSPassRole condition must set iam:PassedToService=ecs-tasks.amazonaws.com. Without this condition the role could be passed to Lambda, EC2, or other services."
+  }
+
+  # iam:PassRole must never appear in a statement with Resource="*", which
+  # would allow passing any role in the account to ECS — not just project roles.
+  # try() guards against tostring() failing on a list-typed Resource attribute —
+  # a list Resource is never "*", so the try fallback (false) is correct.
+  assert {
+    condition = !anytrue([
+      for s in jsondecode(aws_iam_role_policy.github_deploy.policy).Statement :
+      contains(tolist(s.Action), "iam:PassRole") &&
+      try(tostring(s.Resource) == "*", false)
+    ])
+    error_message = "iam:PassRole must not be granted on Resource='*'. Scope to specific project-prefixed role ARNs."
+  }
+}
+
 # ── GitHub deploy policy: Secrets Manager scoped to /platform/* and rds!* ────
 #
 # The deploy role must not have access to arbitrary Secrets Manager secrets —

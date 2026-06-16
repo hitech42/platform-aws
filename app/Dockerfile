@@ -33,6 +33,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /project
 RUN mkdir -p app && touch app/__init__.py
 COPY src/ app/src/
+# alembic.ini is required by the migration one-off task in CI/CD (app-deploy.yml).
+# script_location = src/db/migrations is relative to the ini file's location
+# (/project/app/), resolving to /project/app/src/db/migrations/ inside the container.
+COPY alembic.ini app/alembic.ini
 
 USER appuser
 

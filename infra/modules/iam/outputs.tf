@@ -4,8 +4,13 @@ output "github_actions_role_arn" {
 }
 
 output "ecs_task_execution_role_arn" {
-  description = "ARN of the ECS task execution role (used by the ECS agent). Pass to the task definition in E2."
+  description = "ARN of the ECS task execution role (used by the ECS agent to pull images and write logs)."
   value       = aws_iam_role.ecs_task_execution.arn
+}
+
+output "ecs_task_execution_role_name" {
+  description = "Name of the ECS task execution role. Used by aws_iam_role_policy.ecs_task_execution in envs/dev to attach the scoped ECR + CloudWatch inline policy without creating a module dependency cycle."
+  value       = aws_iam_role.ecs_task_execution.name
 }
 
 output "ecs_task_role_arn" {

@@ -76,6 +76,105 @@ module "data" {
   # enable_http_endpoint (true) use module defaults
 }
 
+# ── ECS service (ECR, cluster, task definition, ALB, service) ────────────────
+#
+# Depends on: iam (role ARNs), kms (key ARN), network (VPC/subnets/SGs),
+# data (db_endpoint).  All inputs are forwarded from module outputs — no
+# new root-level variables are required.
+#
+# container_image defaults to "placeholder" for the initial terraform apply
+# (before any image exists in ECR).  CI/CD (app-deploy.yml) owns the image
+# version after the first build-push run.
+
+module "ecs_service" {
+  source = "../../modules/ecs-service"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  kms_key_arn = module.kms.kms_key_arn
+
+  vpc_id            = module.network.vpc_id
+  public_subnet_ids = module.network.public_subnet_ids
+  alb_sg_id         = module.network.alb_sg_id
+  ecs_service_sg_id = module.network.ecs_service_sg_id
+
+  ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
+  ecs_task_role_arn           = module.iam.ecs_task_role_arn
+
+  db_endpoint = module.data.db_endpoint
+  db_username = var.db_username
+  db_name     = var.db_name
+  # task_cpu, task_memory, desired_count, app_port,
+  # log_retention_days, ecr_image_count_limit use module defaults
+}
+
+# ── ECS task execution role runtime policy ────────────────────────────────────
+#
+# Lives here rather than in the iam module to break the iam→ecs-service cycle:
+#   iam (creates execution role) → ecs-service (creates ECR repo + log group)
+#   → [this policy needs ecr_repository_arn + log_group_arn from ecs-service]
+#
+# Split into four scoped statements:
+#   ECRAuthToken         — ecr:GetAuthorizationToken has no resource ARN; wildcard required
+#   ECRPullImage         — scoped to this environment's ECR repository only
+#   CloudWatchLogWrite   — scoped to this log group only (:* covers stream-level operations)
+#   KMSDecryptForECR     — Decrypt for ECR image pull; GenerateDataKey for encrypted log writes
+#
+# Note: the KMS key policy grants Decrypt to the *task* role explicitly
+# (ECSTaskDecrypt statement in modules/kms/main.tf) for belt-and-suspenders
+# visibility.  The execution role relies on the RootFullControl statement in
+# the key policy enabling IAM delegation — this inline policy is sufficient.
+
+resource "aws_iam_role_policy" "ecs_task_execution" {
+  name = "${local.prefix}-ecs-task-execution-policy"
+  role = module.iam.ecs_task_execution_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ECRAuthToken"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPullImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ]
+        Resource = module.ecs_service.ecr_repository_arn
+      },
+      {
+        Sid    = "CloudWatchLogWrite"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        # :* is required — the awslogs driver creates and writes streams
+        # at /ecs/{container}/{task-id} under this log group.
+        Resource = "${module.ecs_service.log_group_arn}:*"
+      },
+      {
+        Sid    = "KMSDecryptForECR"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+        ]
+        # Decrypt: ECR image pull decryption.
+        # GenerateDataKey: CloudWatch Logs encrypted log-stream writes.
+        Resource = module.kms.kms_key_arn
+      },
+    ]
+  })
+}
+
 # ── ECS task role runtime policy ──────────────────────────────────────────────
 #
 # Lives here rather than in the iam module to break the dependency cycle:
