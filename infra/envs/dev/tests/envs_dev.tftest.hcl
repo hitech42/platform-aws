@@ -13,23 +13,28 @@
 # not the internals of each module.  Module internals are tested in their own
 # tests/.tftest.hcl files.
 #
-# module.kms     → override_module: mock provider returns non-ARN strings for
-#                  kms_key_arn (e.g. "9q3cpkep"), which fails kms_key_id
-#                  validation on aws_db_instance.  A valid fake ARN unblocks
-#                  module.data and aws_iam_role_policy.ecs_task.
+# module.kms        → override_module: mock provider returns non-ARN strings for
+#                     kms_key_arn (e.g. "9q3cpkep"), which fails kms_key_id
+#                     validation on aws_db_instance.  A valid fake ARN unblocks
+#                     module.data and aws_iam_role_policy.ecs_task.
 #
-# module.data    → override_module: the mock provider returns an empty list for
-#                  master_user_secret (AWS only populates it post-provisioning),
-#                  causing master_user_secret[0] to panic.  Known fake values
-#                  also give deterministic db_resource_id for assertions.
+# module.data       → override_module: the mock provider returns an empty list for
+#                     master_user_secret (AWS only populates it post-provisioning),
+#                     causing master_user_secret[0] to panic.  Known fake values
+#                     also give deterministic db_resource_id for assertions.
+#
+# module.ecs_service → override_module: the mock provider returns non-ARN strings
+#                     for ecr_repository_arn and log_group_arn, which are embedded
+#                     in aws_iam_role_policy.ecs_task_execution.  Valid fake ARNs
+#                     also make the execution policy assertions deterministic.
 #
 # aws_sns_topic.billing_alarm
-#                → override_resource: mock-generated arn ("wr16sars") fails
-#                  alarm_actions ARN validation on aws_cloudwatch_metric_alarm.
+#                   → override_resource: mock-generated arn ("wr16sars") fails
+#                     alarm_actions ARN validation on aws_cloudwatch_metric_alarm.
 #
-# data sources   → override_data: aws_caller_identity and aws_region return
-#                  null attributes from the mock provider, which would produce
-#                  invalid ARN strings in resource policies.
+# data sources      → override_data: aws_caller_identity and aws_region return
+#                     null attributes from the mock provider, which would produce
+#                     invalid ARN strings in resource policies.
 
 mock_provider "aws" {}
 
@@ -112,6 +117,20 @@ run "valid_environment_accepted" {
     }
   }
 
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
   override_resource {
     target = aws_sns_topic.billing_alarm
     values = {
@@ -177,6 +196,20 @@ run "ecs_task_policy_rds_scoped" {
       database_name     = "platform"
       db_username       = "platform_app"
       master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+    }
+  }
+
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
     }
   }
 
@@ -274,6 +307,20 @@ run "ecs_task_policy_secrets_scoped" {
     }
   }
 
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
   override_resource {
     target = aws_sns_topic.billing_alarm
     values = {
@@ -309,5 +356,117 @@ run "ecs_task_policy_secrets_scoped" {
       can(regex("secret:rds!", tostring(s.Resource)))
     ])
     error_message = "secretsmanager:GetSecretValue must NOT be granted on rds!* secrets. The app never reads the RDS master credential."
+  }
+}
+
+# ── ECS task execution policy: ECR and CloudWatch access must be scoped ───────
+#
+# ecr:GetAuthorizationToken legitimately requires Resource="*" (AWS limitation —
+# the API authenticates to the registry as a whole, not to a specific repository).
+# All other ECR and CloudWatch permissions must be scoped to project ARNs.
+
+run "ecs_task_execution_policy_scoped" {
+  command = apply
+
+  override_data {
+    target = module.network.data.aws_availability_zones.available
+    values = {
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
+    }
+  }
+
+  override_data {
+    target = data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+      user_id    = "AIDAXXXXXXXXXXXXXXXXX"
+    }
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = {
+      name        = "us-east-1"
+      description = "US East (N. Virginia)"
+    }
+  }
+
+  override_module {
+    target = module.kms
+    outputs = {
+      kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000001"
+      kms_key_id    = "00000000-0000-0000-0000-000000000001"
+      kms_alias_arn = "arn:aws:kms:us-east-1:123456789012:alias/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.data
+    outputs = {
+      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      port              = 5432
+      database_name     = "platform"
+      db_username       = "platform_app"
+      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+    }
+  }
+
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_resource {
+    target = aws_sns_topic.billing_alarm
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:test-dev-billing-alarm"
+    }
+  }
+
+  # ECRAuthToken legitimately requires Resource="*" — assert it IS present with
+  # that resource so we catch any future tightening that breaks ECR auth.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task_execution.policy).Statement :
+      s.Sid == "ECRAuthToken" &&
+      contains(tolist(s.Action), "ecr:GetAuthorizationToken") &&
+      tostring(s.Resource) == "*"
+    ])
+    error_message = "ECRAuthToken statement must grant ecr:GetAuthorizationToken on Resource='*'. AWS requires the wildcard — there is no repository-level ARN for this API call."
+  }
+
+  # ECR image pull (BatchGetImage etc.) must be scoped to the specific ECR
+  # repository — not a wildcard that would permit pulling from any repository
+  # in the account (including repositories owned by other teams).
+  assert {
+    condition = !anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task_execution.policy).Statement :
+      contains(tolist(s.Action), "ecr:BatchGetImage") &&
+      tostring(s.Resource) == "*"
+    ])
+    error_message = "ecr:BatchGetImage must not be granted on Resource='*'. Scope to the specific ECR repository ARN to prevent pulling images from other repositories."
+  }
+
+  # CloudWatch log writes must be scoped to the ECS log group — not a wildcard
+  # that would allow writing to any log group in the account.
+  assert {
+    condition = !anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task_execution.policy).Statement :
+      contains(tolist(s.Action), "logs:PutLogEvents") &&
+      tostring(s.Resource) == "*"
+    ])
+    error_message = "logs:PutLogEvents must not be granted on Resource='*'. Scope to the specific CloudWatch log group ARN."
   }
 }
