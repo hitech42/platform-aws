@@ -8,7 +8,12 @@ aws_region   = "us-east-1"
 environment  = "dev"
 
 # GitHub — replace with your actual org and repo name.
-github_org  = "HiTech42"
+# Must match the canonical-case login exactly (GitHub logins are case-insensitive
+# for URLs/git, but the OIDC token's `sub` claim uses the canonical-case login —
+# verify with `gh api users/<name> --jq .login`). A case mismatch here causes
+# AssumeRoleWithWebIdentity to fail with "Not authorized" even though the role
+# ARN and condition values look correct at a glance.
+github_org  = "hitech42"
 github_repo = "platform-aws"
 
 # Set to false if the GitHub OIDC provider already exists in this AWS account
