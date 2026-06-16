@@ -139,7 +139,10 @@ The `approve` route commits twice: once after `PROVISIONING` (before the AWS cal
 
 - Every `boto3` client must accept an optional `endpoint_url` sourced from `settings.aws_endpoint_url`. This ensures the same code path is used against LocalStack locally and real AWS in staging/prod.
 - IAM: least-privilege only — no `"*"` actions or resources in Terraform policies.
-- `DB_AUTH_MODE=iam` is the target for AWS deployments (RDS IAM auth via token). The `get_connect_args()` stub in `db/session.py` is the extension point.
+- `DB_AUTH_MODE=iam` is used in AWS deployments (RDS IAM auth via token); `DB_AUTH_MODE=password` (default) is used for local dev and tests. `app/src/db/iam_auth.py` generates the token (`boto3.client("rds").generate_db_auth_token(...)`); it is shared by `db/session.py` (long-lived app engine) and `db/migrations/env.py` (one-off Alembic task).
+  - **App engine** (`db/session.py`): IAM-mode engines use `poolclass=NullPool` plus a SQLAlchemy `do_connect` event listener that calls `generate_iam_auth_token()` fresh for every physical connection — tokens expire after 15 minutes, so none may be cached on the engine or reused across connections.
+  - **Migration task** (`env.py`): since it's a one-shot process, a single token generated immediately before connecting is sufficient — no listener needed.
+  - Integration tests and CI always run with plain password auth (testcontainers/CI Postgres), so `db_auth_mode` is never `"iam"` in that path — `env.py`'s `run_migrations_online()` only branches into IAM-token generation when `settings.db_auth_mode == "iam"`, never affecting the test harness's `cfg.set_main_option("sqlalchemy.url", ...)` override.
 
 ## Data Layer
 
