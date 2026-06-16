@@ -21,8 +21,8 @@ locals {
 # ── Customer-managed KMS key ───────────────────────────────────────────────────
 #
 # One key per environment used for:
-#   - Aurora cluster storage encryption
-#   - Aurora-managed master credential in Secrets Manager (master_user_secret_kms_key_id)
+#   - RDS instance storage encryption
+#   - RDS-managed master credential in Secrets Manager (master_user_secret_kms_key_id)
 #   - Application secrets written by the platform API (/platform/* namespace)
 #   - CloudWatch log group encryption (E3)
 #
@@ -30,7 +30,7 @@ locals {
 # keys if your threat model requires blast-radius reduction.
 
 resource "aws_kms_key" "platform" {
-  description             = "Platform CMK for ${local.prefix}: Aurora, Secrets Manager, CloudWatch."
+  description             = "Platform CMK for ${local.prefix}: RDS, Secrets Manager, CloudWatch."
   deletion_window_in_days = 7 # Dev: minimum window for clean teardowns. Use 30 in staging/prod.
   enable_key_rotation     = true
 
@@ -50,8 +50,8 @@ resource "aws_kms_key" "platform" {
         Action   = "kms:*"
         Resource = "*"
       },
-      # RDS service principal uses this key for Aurora storage encryption and
-      # for encrypting the Aurora-managed master credential in Secrets Manager.
+      # RDS service principal uses this key for RDS storage encryption and
+      # for encrypting the RDS-managed master credential in Secrets Manager.
       # CreateGrant lets RDS establish a key grant so it can call kms:Decrypt
       # on behalf of your account without requiring a user-present session.
       {

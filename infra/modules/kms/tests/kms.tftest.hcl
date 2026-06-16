@@ -66,7 +66,7 @@ run "key_policy_principals" {
     error_message = "Key policy must include the root account principal for break-glass admin access."
   }
 
-  # RDS service principal must have CreateGrant so Aurora can use the key for
+  # RDS service principal must have CreateGrant so RDS can use the key for
   # storage encryption via key grants.
   assert {
     condition = anytrue([
@@ -74,7 +74,7 @@ run "key_policy_principals" {
       try(s.Principal.Service == "rds.amazonaws.com", false) &&
       contains(tolist(s.Action), "kms:CreateGrant")
     ])
-    error_message = "Key policy must allow rds.amazonaws.com kms:CreateGrant so Aurora can encrypt storage."
+    error_message = "Key policy must allow rds.amazonaws.com kms:CreateGrant so RDS can encrypt storage."
   }
 
   # ECS task role must appear in the key policy with Decrypt access.

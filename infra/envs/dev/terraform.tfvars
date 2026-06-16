@@ -28,7 +28,7 @@ db_username = "platform_app"
 
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 # Alert fires when estimated AWS charges exceed this USD amount per day.
-# Set this BEFORE applying any billable resources (KMS key, Aurora cluster).
+# Set this BEFORE applying any billable resources (KMS key, RDS instance).
 # Subscribe your email after first apply:
 #   aws sns subscribe \
 #     --topic-arn $(terraform -chdir=infra/envs/dev output -raw billing_alarm_topic_arn) \

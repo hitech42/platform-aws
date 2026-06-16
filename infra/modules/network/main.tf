@@ -26,7 +26,7 @@ data "aws_availability_zones" "available" {
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
-  enable_dns_hostnames = true # Required for RDS/Aurora endpoint resolution.
+  enable_dns_hostnames = true # Required for RDS endpoint resolution.
 
   tags = merge(local.tags, { Name = "${local.prefix}-vpc" })
 }
@@ -39,8 +39,8 @@ resource "aws_vpc" "main" {
 #     outbound traffic to ECR/Secrets Manager/CloudWatch via the IGW.
 #     No NAT Gateway — saves ~$32/mo per AZ for a dev environment.
 #
-#   Private (AZ-0, AZ-1): Aurora DB subnet group.  No route to the internet
-#     (no NAT), so Aurora cannot initiate outbound connections.  This provides
+#   Private (AZ-0, AZ-1): RDS DB subnet group.  No route to the internet
+#     (no NAT), so RDS cannot initiate outbound connections.  This provides
 #     a second network-isolation layer beyond the security group: even a
 #     misconfigured db_sg cannot be exploited from the internet because there
 #     is no path from private subnets to the IGW.
@@ -104,7 +104,7 @@ resource "aws_route_table_association" "public" {
 }
 
 # Private route table: local VPC routing only (no default route, no NAT).
-# Aurora only needs to be reachable FROM ECS tasks (intra-VPC), not to reach
+# RDS only needs to be reachable FROM ECS tasks (intra-VPC), not to reach
 # the internet itself.
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
@@ -152,7 +152,7 @@ resource "aws_security_group" "alb" {
 }
 
 # ECS service — inbound ONLY from the ALB, outbound to internet (ECR, Secrets
-# Manager, CloudWatch Logs, Aurora).
+# Manager, CloudWatch Logs, RDS).
 #
 # Why outbound-all from a public-subnet ECS task works without NAT:
 #   ECS tasks in public subnets get a public IP (map_public_ip_on_launch=true).
@@ -182,10 +182,10 @@ resource "aws_security_group" "ecs_service" {
   tags = merge(local.tags, { Name = "${local.prefix}-ecs-service-sg" })
 }
 
-# Aurora DB — inbound Postgres ONLY from ECS tasks, outbound all.
+# RDS DB — inbound Postgres ONLY from ECS tasks, outbound all.
 #
 # Outbound is left as allow-all rather than none because:
-#  - Aurora needs to communicate with Route 53 (DNS) for its own endpoint resolution.
+#  - RDS needs to communicate with Route 53 (DNS) for its own endpoint resolution.
 #  - The private subnets have no route to the internet anyway (no NAT, no IGW
 #    default route), so "allow-all outbound" in a security group attached to a
 #    private-subnet resource does not grant actual internet access — the routing
@@ -193,7 +193,7 @@ resource "aws_security_group" "ecs_service" {
 #  - This avoids edge cases with the AWS provider's default-egress behavior.
 resource "aws_security_group" "db" {
   name        = "${local.prefix}-db-sg"
-  description = "Aurora: inbound Postgres from ECS service only"
+  description = "RDS: inbound Postgres from ECS service only"
   vpc_id      = aws_vpc.main.id
 
   ingress {

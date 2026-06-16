@@ -429,7 +429,7 @@ resource "aws_iam_role" "ecs_task" {
   # The inline policy for this role (rds-db:connect, secretsmanager:*, kms:Decrypt)
   # is attached as aws_iam_role_policy.ecs_task in infra/envs/dev/main.tf rather
   # than here.  This avoids a module dependency cycle: the rds-db:connect ARN
-  # requires the Aurora cluster_resource_id (from the data module), which depends
+  # requires the RDS db_resource_id (from the data module), which depends
   # on the KMS key (from the kms module), which in turn references this role's ARN.
   # Placing the policy in the root module (envs/dev) breaks the cycle cleanly.
 }

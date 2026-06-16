@@ -9,7 +9,7 @@ output "public_subnet_ids" {
 }
 
 output "private_subnet_ids" {
-  description = "IDs of the two private subnets (Aurora DB subnet group)."
+  description = "IDs of the two private subnets (RDS DB subnet group)."
   value       = aws_subnet.private[*].id
 }
 
@@ -24,6 +24,6 @@ output "ecs_service_sg_id" {
 }
 
 output "db_sg_id" {
-  description = "ID of the Aurora security group."
+  description = "ID of the DB security group."
   value       = aws_security_group.db.id
 }

@@ -87,7 +87,7 @@ run "github_deploy_policy_no_wildcard_actions" {
 #
 # The ECS task role's runtime policy (rds-db:connect, secretsmanager, kms:Decrypt)
 # lives in infra/envs/dev/main.tf as aws_iam_role_policy.ecs_task, not here.
-# This is deliberate: the policy needs the Aurora cluster_resource_id (from the
+# This is deliberate: the policy needs the RDS db_resource_id (from the
 # data module) which creates a dependency cycle if placed inside this module.
 # The execution role's policies are added in E3 (ECR + CloudWatch Log group ARNs).
 
@@ -157,7 +157,7 @@ run "github_deploy_rds_scoped" {
 # ── GitHub deploy policy: Secrets Manager scoped to /platform/* and rds!* ────
 #
 # The deploy role must not have access to arbitrary Secrets Manager secrets —
-# only the application namespace (platform/*) and Aurora master credential (rds!*).
+# only the application namespace (platform/*) and RDS master credential (rds!*).
 
 run "github_deploy_secrets_scoped" {
   command = apply

@@ -67,13 +67,13 @@ variable "vpc_cidr" {
 # ── Database ──────────────────────────────────────────────────────────────────
 
 variable "db_name" {
-  description = "Name of the initial database in the Aurora cluster."
+  description = "Name of the initial database in the RDS instance."
   type        = string
   default     = "platform"
 }
 
 variable "db_username" {
-  description = "Username for the IAM-authenticated application DB user. Created by infra/scripts/setup-db-user.sh after the first apply — not the Aurora master user (postgres)."
+  description = "Username for the IAM-authenticated application DB user. Created by infra/scripts/setup-db-user.sh after the first apply — not the RDS master user (postgres)."
   type        = string
   default     = "platform_app"
 }

@@ -46,7 +46,7 @@ module "iam" {
 # ── KMS customer-managed key ──────────────────────────────────────────────────
 #
 # Depends on iam (for ecs_task_role_arn in the key policy).
-# Used by: Aurora storage, Aurora master credential in Secrets Manager,
+# Used by: RDS storage, RDS master credential in Secrets Manager,
 # application secrets in the platform/* namespace, CloudWatch logs (E4).
 
 module "kms" {
@@ -57,7 +57,7 @@ module "kms" {
   ecs_task_role_arn = module.iam.ecs_task_role_arn
 }
 
-# ── Aurora PostgreSQL Serverless v2 ───────────────────────────────────────────
+# ── RDS PostgreSQL ────────────────────────────────────────────────────────────
 #
 # Depends on kms (for kms_key_arn) and network (for private_subnet_ids, db_sg_id).
 # The db_sg already scopes inbound to ecs_service_sg on port 5432 only.
