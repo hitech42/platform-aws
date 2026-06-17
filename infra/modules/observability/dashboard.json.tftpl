@@ -1,0 +1,121 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 2,
+      "properties": {
+        "markdown": "# CVS Platform Dev — ${environment}\nOperational dashboard. Alarms route to the **${prefix}-alerts** SNS topic. [CloudWatch Alarms](https://console.aws.amazon.com/cloudwatch/home#alarmsV2:) | [Log group](https://console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/${log_group_name_encoded})"
+      }
+    },
+    {
+      "type": "alarm",
+      "x": 0, "y": 2, "width": 24, "height": 3,
+      "properties": {
+        "title": "Alarm Status",
+        "alarms": [
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-ecs-cpu-high",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-ecs-memory-high",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-alb-no-healthy-hosts",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-alb-5xx-high",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-alb-latency-p95-high",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-rds-cpu-high",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-rds-storage-low",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-rds-connections-high",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:${prefix}-secret-provisioning-failures"
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 5, "width": 12, "height": 6,
+      "properties": {
+        "title": "ECS CPU Utilization",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Average",
+        "period": 300,
+        "metrics": [
+          [ "AWS/ECS", "CPUUtilization", "ClusterName", "${ecs_cluster_name}", "ServiceName", "${ecs_service_name}" ]
+        ],
+        "annotations": { "horizontal": [ { "value": 80, "label": "Alarm threshold", "color": "#ff6961" } ] },
+        "yAxis": { "left": { "min": 0, "max": 100, "label": "%" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 5, "width": 12, "height": 6,
+      "properties": {
+        "title": "ECS Memory Utilization (Container Insights)",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Average",
+        "period": 300,
+        "metrics": [
+          [ "ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "${ecs_cluster_name}", "ServiceName", "${ecs_service_name}" ]
+        ],
+        "annotations": { "horizontal": [ { "value": 80, "label": "Alarm threshold", "color": "#ff6961" } ] },
+        "yAxis": { "left": { "min": 0, "label": "MiB" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 11, "width": 12, "height": 6,
+      "properties": {
+        "title": "ALB Request Count vs 5xx Errors",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "metrics": [
+          [ "AWS/ApplicationELB", "RequestCount",              "LoadBalancer", "${alb_arn_suffix}", { "stat": "Sum", "label": "Requests",    "color": "#2ca02c" } ],
+          [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${alb_arn_suffix}", { "stat": "Sum", "label": "5xx Errors",  "color": "#d62728" } ]
+        ],
+        "yAxis": { "left": { "min": 0, "label": "Count" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 11, "width": 12, "height": 6,
+      "properties": {
+        "title": "ALB p95 Latency",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "metrics": [
+          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${alb_arn_suffix}", { "stat": "p95", "label": "p95 latency" } ]
+        ],
+        "annotations": { "horizontal": [ { "value": 2.0, "label": "SLI threshold (2 s)", "color": "#ff6961" } ] },
+        "yAxis": { "left": { "min": 0, "label": "Seconds" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 17, "width": 12, "height": 6,
+      "properties": {
+        "title": "RDS CPU & Connections",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "metrics": [
+          [ "AWS/RDS", "CPUUtilization",      "DBInstanceIdentifier", "${rds_instance_identifier}", { "stat": "Average", "label": "CPU %",       "yAxis": "left"  } ],
+          [ "AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${rds_instance_identifier}", { "stat": "Average", "label": "Connections",  "yAxis": "right" } ]
+        ],
+        "yAxis": {
+          "left":  { "min": 0, "max": 100, "label": "CPU %" },
+          "right": { "min": 0,             "label": "Connections" }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 17, "width": 12, "height": 6,
+      "properties": {
+        "title": "Secret Provisioning Failures (should be 0)",
+        "view": "singleValue",
+        "period": 300,
+        "metrics": [
+          [ "CVSPlatform/Application", "SecretProvisioningFailures", { "stat": "Sum", "label": "Failures" } ]
+        ]
+      }
+    }
+  ]
+}

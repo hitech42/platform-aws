@@ -1,5 +1,10 @@
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
 locals {
-  prefix = "${var.project_name}-${var.environment}"
+  prefix     = "${var.project_name}-${var.environment}"
+  account_id = data.aws_caller_identity.current.account_id
+  region     = data.aws_region.current.name
   tags = {
     Project     = var.project_name
     Environment = var.environment
@@ -262,4 +267,30 @@ resource "aws_cloudwatch_metric_alarm" "secret_provisioning_failures" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 
   tags = local.tags
+}
+
+# ── CloudWatch dashboard ───────────────────────────────────────────────────────
+#
+# Built from a templatefile so the JSON is readable without HCL string escaping.
+# The template receives locals/variables it needs; everything else is static JSON.
+#
+# The log group name contains '/' which is not valid in a URL path segment —
+# replace with the percent-encoded equivalent (%2F) for the console deep-link.
+
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "CVSPlatformDev"
+
+  dashboard_body = templatefile("${path.module}/dashboard.json.tftpl", {
+    environment             = var.environment
+    prefix                  = local.prefix
+    region                  = local.region
+    account_id              = local.account_id
+    ecs_cluster_name        = var.ecs_cluster_name
+    ecs_service_name        = var.ecs_service_name
+    alb_arn_suffix          = var.alb_arn_suffix
+    rds_instance_identifier = var.rds_instance_identifier
+    log_group_name          = var.log_group_name
+    # URL-encode the log group name for the console deep-link in the text widget.
+    log_group_name_encoded = replace(var.log_group_name, "/", "%2F")
+  })
 }
