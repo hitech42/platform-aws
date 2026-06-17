@@ -15,6 +15,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
+  ENVIRONMENT: dev
   ECR_REPOSITORY: cvs-platform
   ECS_CLUSTER: cvs-platform-dev
   ECS_SERVICE: cvs-platform-dev
@@ -63,7 +64,7 @@ jobs:
       - name: Update deployed image URI in SSM
         run: |
           aws ssm put-parameter \
-            --name "/dev/ecs/image-uri" \
+            --name "/${ENVIRONMENT}/ecs/image-uri" \
             --value "${{ steps.image.outputs.image_uri }}" \
             --type String \
             --overwrite
