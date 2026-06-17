@@ -57,6 +57,17 @@ jobs:
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
           echo "Deploying image: ${IMAGE_URI}"
 
+      # ── Update deployed image URI in SSM ────────────────────────────────────
+      # Writes the image URI to SSM before registering the task definition so
+      # that any concurrent Terraform apply also picks up the live image.
+      - name: Update deployed image URI in SSM
+        run: |
+          aws ssm put-parameter \
+            --name "/dev/ecs/image-uri" \
+            --value "${{ steps.image.outputs.image_uri }}" \
+            --type String \
+            --overwrite
+
       # ── Register new task definition revision ────────────────────────────────
       # Fetch the current task definition, swap in the new image, strip fields
       # that are managed by AWS (not re-submittable), register a new revision.

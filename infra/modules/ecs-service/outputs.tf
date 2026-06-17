@@ -47,3 +47,8 @@ output "tg_arn_suffix" {
   description = "Target group ARN suffix (e.g. 'cvs-platform-dev/abc123'). Required for HealthyHostCount and other target-level ALB CloudWatch metrics."
   value       = aws_lb_target_group.app.arn_suffix
 }
+
+output "ssm_image_uri_parameter" {
+  description = "SSM Parameter Store path that holds the currently deployed ECR image URI. CI/CD writes to this on every push; Terraform reads it when creating new task definition revisions."
+  value       = aws_ssm_parameter.image_uri.name
+}
