@@ -37,3 +37,13 @@ output "log_group_arn" {
   description = "ARN of the CloudWatch log group. Used to scope IAM permissions precisely."
   value       = aws_cloudwatch_log_group.app.arn
 }
+
+output "alb_arn_suffix" {
+  description = "ALB ARN suffix (e.g. 'app/cvs-platform-dev/abc123'). Used as the LoadBalancer dimension value for AWS/ApplicationELB CloudWatch metrics."
+  value       = aws_lb.app.arn_suffix
+}
+
+output "tg_arn_suffix" {
+  description = "Target group ARN suffix (e.g. 'cvs-platform-dev/abc123'). Required for HealthyHostCount and other target-level ALB CloudWatch metrics."
+  value       = aws_lb_target_group.app.arn_suffix
+}

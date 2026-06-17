@@ -1,3 +1,8 @@
+output "db_instance_identifier" {
+  description = "RDS DB instance identifier (e.g. 'cvs-platform-dev-postgres'). Used as the DBInstanceIdentifier CloudWatch metric dimension for AWS/RDS alarms."
+  value       = aws_db_instance.postgres.identifier
+}
+
 output "db_arn" {
   description = "ARN of the RDS PostgreSQL instance. Used for IAM policy scoping."
   value       = aws_db_instance.postgres.arn

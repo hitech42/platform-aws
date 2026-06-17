@@ -231,6 +231,28 @@ resource "aws_iam_role_policy" "ecs_task" {
   })
 }
 
+# ── Observability (CloudWatch alarms, SNS alerts, dashboard) ─────────────────
+#
+# Depends on ecs_service (cluster/service names, ALB suffix) and data (RDS id).
+
+module "observability" {
+  source = "../../modules/observability"
+
+  project_name = var.project_name
+  environment  = var.environment
+  alert_email  = var.alert_email
+
+  ecs_cluster_name = module.ecs_service.ecs_cluster_name
+  ecs_service_name = module.ecs_service.ecs_service_name
+
+  alb_arn_suffix = module.ecs_service.alb_arn_suffix
+  tg_arn_suffix  = module.ecs_service.tg_arn_suffix
+
+  rds_instance_identifier = module.data.db_instance_identifier
+
+  log_group_name = module.ecs_service.log_group_name
+}
+
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 #
 # AWS/Billing metrics are only available in us-east-1 regardless of deployment

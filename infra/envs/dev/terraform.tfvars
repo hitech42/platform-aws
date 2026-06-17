@@ -31,6 +31,12 @@ state_bucket_name = "cvs-platform-tfstate-us-east-1-cae3b4ba"
 db_name     = "platform"
 db_username = "platform_app"
 
+# ── Observability ─────────────────────────────────────────────────────────────
+# Email address for operational (service) alerts.
+# After terraform apply, AWS sends a confirmation email — alerts are silently
+# dropped until the recipient clicks the confirmation link. Confirm immediately.
+alert_email = "zimbalar42@gmail.com"
+
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 # Alert fires when estimated AWS charges exceed this USD amount per day.
 # Set this BEFORE applying any billable resources (KMS key, RDS instance).
