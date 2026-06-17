@@ -114,14 +114,14 @@ run "valid_environment_accepted" {
   override_module {
     target = module.data
     outputs = {
-      db_endpoint             = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      db_resource_id          = "db-AAAAAAAAAAAAAAAAAAAAA"
-      db_arn                  = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
-      db_instance_identifier  = "test-dev-postgres"
-      port                    = 5432
-      database_name           = "platform"
-      db_username             = "platform_app"
-      master_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
