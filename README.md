@@ -22,6 +22,10 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 | Docker | 24+ | For LocalStack only |
 | Docker Compose | v2 | Bundled with Docker Desktop |
 
+## Roadmap / Work in Progress (targeted to be ready by the technical interview date)
+- Staging environment (E5)
+- Bedrock enhancement 
+
 ## Setup
 
 ### 1. Create and activate a virtual environment

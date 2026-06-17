@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1150" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ═══ Title ═══ -->
+    <mxCell id="2" value="CVS Platform — AWS Architecture (dev)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="540" y="12" width="620" height="40" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ VPC ═══ -->
+    <mxCell id="10" value="AWS VPC (10.0.0.0/16)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#f9a825;strokeWidth=2;fontSize=13;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="280" y="70" width="970" height="860" as="geometry" />
+    </mxCell>
+
+    <!-- Public Subnets -->
+    <mxCell id="11" value="Public Subnets (2 × AZ)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=1;fontSize=11;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="310" y="140" width="390" height="760" as="geometry" />
+    </mxCell>
+
+    <!-- Private Subnets -->
+    <mxCell id="12" value="Private Subnets (2 × AZ)&#xa;no default route · no NAT Gateway" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=1;fontSize=11;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+      <mxGeometry x="720" y="140" width="500" height="390" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ External: Internet / GitHub Actions ═══ -->
+    <mxCell id="40" value="Internet / Users" style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="40" y="270" width="160" height="80" as="geometry" />
+    </mxCell>
+
+    <mxCell id="41" value="GitHub Actions&#xa;(CI / CD)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2088FF;strokeColor=#0D47A1;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="50" y="590" width="150" height="70" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ Inside Public Subnet ═══ -->
+    <mxCell id="20" value="Application Load Balancer&#xa;HTTP :80 · internet-facing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="360" y="280" width="240" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="21" value="ECS Fargate Task&#xa;FastAPI · Python 3.12&#xa;0.25 vCPU · 1 GiB RAM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="355" y="570" width="240" height="90" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ Inside Private Subnet ═══ -->
+    <mxCell id="30" value="RDS PostgreSQL&#xa;db.t4g.micro · IAM auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="805" y="270" width="200" height="70" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ Right column: AWS managed services ═══ -->
+    <mxCell id="50" value="Amazon ECR&#xa;cvs-platform (IMMUTABLE tags)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1330" y="80" width="210" height="60" as="geometry" />
+    </mxCell>
+
+    <mxCell id="51" value="SSM Parameter Store&#xa;/{env}/ecs/image-uri" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1330" y="210" width="210" height="60" as="geometry" />
+    </mxCell>
+
+    <mxCell id="52" value="AWS Secrets Manager&#xa;platform/{svc}/{env}/{name}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1330" y="390" width="210" height="60" as="geometry" />
+    </mxCell>
+
+    <mxCell id="53" value="CloudWatch Logs + Alarms&#xa;/ecs/cvs-platform-dev" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1330" y="555" width="210" height="60" as="geometry" />
+    </mxCell>
+
+    <mxCell id="54" value="SNS Topic&#xa;cvs-platform-dev-alerts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#E65100;fontColor=#ffffff;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1330" y="700" width="210" height="60" as="geometry" />
+    </mxCell>
+
+    <mxCell id="55" value="Email (ops team)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="1330" y="830" width="210" height="50" as="geometry" />
+    </mxCell>
+
+    <!-- KMS note at bottom -->
+    <mxCell id="56" value="AWS KMS (Platform CMK) — encrypts: ECR images · RDS storage · Secrets Manager · CloudWatch Logs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="280" y="960" width="700" height="40" as="geometry" />
+    </mxCell>
+
+    <!-- IAM note at bottom -->
+    <mxCell id="57" value="IAM Roles: GitHub OIDC deploy role · ECS task execution role · ECS task role (rds-db:connect · secretsmanager · kms:Decrypt)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="1000" y="960" width="550" height="40" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ Edges ═══ -->
+
+    <!-- Internet → ALB -->
+    <mxCell id="e1" value="HTTP :80" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="40" target="20" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ALB → ECS -->
+    <mxCell id="e2" value="HTTP :8000" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="20" target="21" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ECS → RDS -->
+    <mxCell id="e3" value="IAM auth :5432" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;" edge="1" source="21" target="30" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ECR → ECS (pull image) -->
+    <mxCell id="e9" value="pull image" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;dashed=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="50" target="21" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ECS → Secrets Manager -->
+    <mxCell id="e4" value="GetSecretValue" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="21" target="52" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ECS → CloudWatch Logs -->
+    <mxCell id="e5" value="awslogs driver" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;dashed=1;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="21" target="53" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- GitHub Actions → ECR (push image) -->
+    <mxCell id="e6" value="docker push" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=1;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" source="41" target="50" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- GitHub Actions → SSM (write image URI) -->
+    <mxCell id="e7" value="write image URI" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="41" target="51" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- GitHub Actions → ECS (register task def + update-service) -->
+    <mxCell id="e8" value="register task def&#xa;+ update-service" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" source="41" target="21" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- CloudWatch → SNS (metric alarm) -->
+    <mxCell id="e10" value="metric alarm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="53" target="54" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- SNS → Email -->
+    <mxCell id="e11" value="email notification" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="54" target="55" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>
