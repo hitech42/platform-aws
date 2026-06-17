@@ -138,7 +138,7 @@ output "dashboard_url" {
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 
 output "billing_alarm_topic_arn" {
-  description = "SNS topic ARN for the billing alarm. Subscribe your email: aws sns subscribe --topic-arn <this value> --protocol email --notification-endpoint your@email.com"
+  description = "SNS topic ARN for the billing alarm (subscribed to alert_email via aws_sns_topic_subscription.billing_alarm_email)."
   value       = aws_sns_topic.billing_alarm.arn
 }
 

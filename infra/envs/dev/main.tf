@@ -274,6 +274,12 @@ resource "aws_sns_topic" "billing_alarm" {
   tags = local.tags
 }
 
+resource "aws_sns_topic_subscription" "billing_alarm_email" {
+  topic_arn = aws_sns_topic.billing_alarm.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
 resource "aws_cloudwatch_metric_alarm" "billing" {
   alarm_name        = "${local.prefix}-estimated-charges"
   alarm_description = "Estimated AWS charges for ${local.prefix} have exceeded ${var.billing_alarm_threshold} USD. Review the Cost Explorer before applying further infrastructure."
