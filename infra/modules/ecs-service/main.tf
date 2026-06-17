@@ -180,9 +180,10 @@ resource "aws_ecs_task_definition" "app" {
       }
 
       healthCheck = {
+        # python:3.12-slim does not include curl; use urllib instead.
         # startPeriod gives the app time to complete startup and Alembic
         # migrations before health checks begin counting failures.
-        command     = ["CMD-SHELL", "curl -f http://localhost:${var.app_port}/healthz || exit 1"]
+        command     = ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${var.app_port}/healthz')"]
         interval    = 30
         timeout     = 5
         retries     = 3
