@@ -108,9 +108,14 @@ resource "aws_cloudwatch_log_group" "app" {
 resource "aws_ecs_cluster" "main" {
   name = local.prefix
 
+  # Container Insights publishes per-container CPU and memory metrics to
+  # CloudWatch (namespace ECS/ContainerInsights). Required for the ECS memory
+  # utilization alarm — Fargate tasks do not emit memory metrics to the
+  # standard AWS/ECS namespace. Cost: charged at standard CloudWatch Logs
+  # ingestion rates for the insight data; negligible at dev/demo volume.
   setting {
     name  = "containerInsights"
-    value = "disabled"
+    value = "enabled"
   }
 
   tags = merge(local.tags, { Name = local.prefix })
