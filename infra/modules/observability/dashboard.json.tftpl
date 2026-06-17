@@ -30,6 +30,7 @@
       "x": 0, "y": 5, "width": 12, "height": 6,
       "properties": {
         "title": "ECS CPU Utilization",
+        "region": "${region}",
         "view": "timeSeries",
         "stacked": false,
         "stat": "Average",
@@ -46,6 +47,7 @@
       "x": 12, "y": 5, "width": 12, "height": 6,
       "properties": {
         "title": "ECS Memory Utilization (Container Insights)",
+        "region": "${region}",
         "view": "timeSeries",
         "stacked": false,
         "stat": "Average",
@@ -62,12 +64,13 @@
       "x": 0, "y": 11, "width": 12, "height": 6,
       "properties": {
         "title": "ALB Request Count vs 5xx Errors",
+        "region": "${region}",
         "view": "timeSeries",
         "stacked": false,
         "period": 300,
         "metrics": [
-          [ "AWS/ApplicationELB", "RequestCount",              "LoadBalancer", "${alb_arn_suffix}", { "stat": "Sum", "label": "Requests",    "color": "#2ca02c" } ],
-          [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${alb_arn_suffix}", { "stat": "Sum", "label": "5xx Errors",  "color": "#d62728" } ]
+          [ "AWS/ApplicationELB", "RequestCount",              "LoadBalancer", "${alb_arn_suffix}", { "stat": "Sum", "label": "Requests",   "color": "#2ca02c" } ],
+          [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${alb_arn_suffix}", { "stat": "Sum", "label": "5xx Errors", "color": "#d62728" } ]
         ],
         "yAxis": { "left": { "min": 0, "label": "Count" } }
       }
@@ -77,6 +80,7 @@
       "x": 12, "y": 11, "width": 12, "height": 6,
       "properties": {
         "title": "ALB p95 Latency",
+        "region": "${region}",
         "view": "timeSeries",
         "stacked": false,
         "period": 300,
@@ -92,12 +96,13 @@
       "x": 0, "y": 17, "width": 12, "height": 6,
       "properties": {
         "title": "RDS CPU & Connections",
+        "region": "${region}",
         "view": "timeSeries",
         "stacked": false,
         "period": 300,
         "metrics": [
-          [ "AWS/RDS", "CPUUtilization",      "DBInstanceIdentifier", "${rds_instance_identifier}", { "stat": "Average", "label": "CPU %",       "yAxis": "left"  } ],
-          [ "AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${rds_instance_identifier}", { "stat": "Average", "label": "Connections",  "yAxis": "right" } ]
+          [ "AWS/RDS", "CPUUtilization",      "DBInstanceIdentifier", "${rds_instance_identifier}", { "stat": "Average", "label": "CPU %",      "yAxis": "left"  } ],
+          [ "AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${rds_instance_identifier}", { "stat": "Average", "label": "Connections", "yAxis": "right" } ]
         ],
         "yAxis": {
           "left":  { "min": 0, "max": 100, "label": "CPU %" },
@@ -110,6 +115,7 @@
       "x": 12, "y": 17, "width": 12, "height": 6,
       "properties": {
         "title": "Secret Provisioning Failures (should be 0)",
+        "region": "${region}",
         "view": "singleValue",
         "period": 300,
         "metrics": [
