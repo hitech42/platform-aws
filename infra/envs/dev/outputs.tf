@@ -123,10 +123,22 @@ output "log_group_name" {
   value       = module.ecs_service.log_group_name
 }
 
+# ── Observability ─────────────────────────────────────────────────────────────
+
+output "alerts_topic_arn" {
+  description = "SNS topic ARN for operational (service) alerts. Subscribe additional endpoints (PagerDuty, Slack) with aws_sns_topic_subscription resources, or via: aws sns subscribe --topic-arn <value> --protocol email --notification-endpoint your@email.com"
+  value       = module.observability.alerts_topic_arn
+}
+
+output "dashboard_url" {
+  description = "CloudWatch console URL for the CVSPlatformDev dashboard."
+  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${module.observability.dashboard_name}"
+}
+
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 
 output "billing_alarm_topic_arn" {
-  description = "SNS topic ARN for the billing alarm. Subscribe your email: aws sns subscribe --topic-arn <this value> --protocol email --notification-endpoint your@email.com"
+  description = "SNS topic ARN for the billing alarm (subscribed to alert_email via aws_sns_topic_subscription.billing_alarm_email)."
   value       = aws_sns_topic.billing_alarm.arn
 }
 

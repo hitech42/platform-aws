@@ -28,6 +28,12 @@
 #                     in aws_iam_role_policy.ecs_task_execution.  Valid fake ARNs
 #                     also make the execution policy assertions deterministic.
 #
+# module.observability → override_module: the module creates alarms, SNS topics,
+#                     log metric filters, and a dashboard — all of which reference
+#                     computed ARNs from other modules.  Overriding keeps these
+#                     env-level tests focused on wiring, not observability internals
+#                     (those are tested in modules/observability/tests/).
+#
 # aws_sns_topic.billing_alarm
 #                   → override_resource: mock-generated arn ("wr16sars") fails
 #                     alarm_actions ARN validation on aws_cloudwatch_metric_alarm.
@@ -46,6 +52,7 @@ variables {
   state_bucket_name = "test-tfstate-123456789"
   db_username       = "platform_app"
   db_name           = "platform"
+  alert_email       = "test@example.com"
 }
 
 # ── Re-usable locals for mock ARNs (Terraform test files share a module scope,
@@ -107,13 +114,14 @@ run "valid_environment_accepted" {
   override_module {
     target = module.data
     outputs = {
-      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
-      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
-      port              = 5432
-      database_name     = "platform"
-      db_username       = "platform_app"
-      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -126,8 +134,18 @@ run "valid_environment_accepted" {
       ecs_service_name       = "test-dev"
       task_definition_family = "test-dev"
       alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
       log_group_name         = "/ecs/test-dev"
       log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.observability
+    outputs = {
+      alerts_topic_arn = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      dashboard_name   = "CVSPlatformDev"
     }
   }
 
@@ -189,13 +207,14 @@ run "ecs_task_policy_rds_scoped" {
   override_module {
     target = module.data
     outputs = {
-      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
-      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
-      port              = 5432
-      database_name     = "platform"
-      db_username       = "platform_app"
-      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -208,8 +227,18 @@ run "ecs_task_policy_rds_scoped" {
       ecs_service_name       = "test-dev"
       task_definition_family = "test-dev"
       alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
       log_group_name         = "/ecs/test-dev"
       log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.observability
+    outputs = {
+      alerts_topic_arn = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      dashboard_name   = "CVSPlatformDev"
     }
   }
 
@@ -297,13 +326,14 @@ run "ecs_task_policy_secrets_scoped" {
   override_module {
     target = module.data
     outputs = {
-      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
-      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
-      port              = 5432
-      database_name     = "platform"
-      db_username       = "platform_app"
-      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -316,8 +346,18 @@ run "ecs_task_policy_secrets_scoped" {
       ecs_service_name       = "test-dev"
       task_definition_family = "test-dev"
       alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
       log_group_name         = "/ecs/test-dev"
       log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.observability
+    outputs = {
+      alerts_topic_arn = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      dashboard_name   = "CVSPlatformDev"
     }
   }
 
@@ -404,13 +444,14 @@ run "ecs_task_execution_policy_scoped" {
   override_module {
     target = module.data
     outputs = {
-      db_endpoint       = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
-      db_resource_id    = "db-AAAAAAAAAAAAAAAAAAAAA"
-      db_arn            = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
-      port              = 5432
-      database_name     = "platform"
-      db_username       = "platform_app"
-      master_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
     }
   }
 
@@ -423,8 +464,18 @@ run "ecs_task_execution_policy_scoped" {
       ecs_service_name       = "test-dev"
       task_definition_family = "test-dev"
       alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
       log_group_name         = "/ecs/test-dev"
       log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.observability
+    outputs = {
+      alerts_topic_arn = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      dashboard_name   = "CVSPlatformDev"
     }
   }
 
@@ -468,5 +519,133 @@ run "ecs_task_execution_policy_scoped" {
       tostring(s.Resource) == "*"
     ])
     error_message = "logs:PutLogEvents must not be granted on Resource='*'. Scope to the specific CloudWatch log group ARN."
+  }
+}
+
+# ── Operational alerts topic must be separate from the billing alarm topic ────
+#
+# Different subscribers (on-call eng vs finance), different urgency, different
+# action — these must always be distinct SNS topics.  This run verifies that
+# module.observability outputs a different ARN from the root-level billing alarm
+# topic, catching any accidental reuse of the billing topic for service alerts.
+
+run "sns_topics_are_separate" {
+  command = apply
+
+  override_data {
+    target = module.network.data.aws_availability_zones.available
+    values = {
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
+    }
+  }
+
+  override_data {
+    target = data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+      user_id    = "AIDAXXXXXXXXXXXXXXXXX"
+    }
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = {
+      name        = "us-east-1"
+      description = "US East (N. Virginia)"
+    }
+  }
+
+  override_module {
+    target = module.kms
+    outputs = {
+      kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000001"
+      kms_key_id    = "00000000-0000-0000-0000-000000000001"
+      kms_alias_arn = "arn:aws:kms:us-east-1:123456789012:alias/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.data
+    outputs = {
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+    }
+  }
+
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  # module.observability is NOT fully overridden here — it runs with mock_provider
+  # so the alerts SNS topic is a real (mock) resource. This gives the assertion
+  # below genuine meaning: it fails if someone wires alerts_topic_arn to the
+  # billing alarm topic instead of creating a new one.
+  #
+  # override_resource is required on the alerts SNS topic because mock_provider
+  # returns a random short string (e.g. "1usfbxqa") for computed ARNs — not a
+  # valid ARN. That invalid string then fails ARN validation in alarm_actions and
+  # topic_arn on dependent resources. Supplying a valid fake ARN here unblocks
+  # those validations while keeping the assertion meaningful: if someone wires the
+  # observability module to emit the billing topic ARN, the two ARNs will match
+  # and the assertion will fail.
+  #
+  # override_data for the module-internal data sources is also required:
+  # the dashboard templatefile calls replace(data.aws_region.current.name, ...) —
+  # which panics if the mock provider returns null for the name attribute.
+
+  override_data {
+    target = module.observability.data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+      user_id    = "AIDAXXXXXXXXXXXXXXXXX"
+    }
+  }
+
+  override_data {
+    target = module.observability.data.aws_region.current
+    values = {
+      name        = "us-east-1"
+      description = "US East (N. Virginia)"
+    }
+  }
+
+  override_resource {
+    target = module.observability.aws_sns_topic.alerts
+    values = {
+      arn  = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      name = "test-dev-alerts"
+    }
+  }
+
+  override_resource {
+    target = aws_sns_topic.billing_alarm
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:test-dev-billing-alarm"
+    }
+  }
+
+  assert {
+    condition     = module.observability.alerts_topic_arn != aws_sns_topic.billing_alarm.arn
+    error_message = "Operational alerts topic ARN must differ from the billing alarm topic ARN. These are separate SNS topics with different subscribers and urgency levels."
   }
 }

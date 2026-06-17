@@ -106,7 +106,8 @@ module "ecs_service" {
   db_endpoint = module.data.db_endpoint
   db_username = var.db_username
   db_name     = var.db_name
-  # task_cpu, task_memory, desired_count, app_port,
+  task_memory = 1024
+  # task_cpu, desired_count, app_port,
   # log_retention_days, ecr_image_count_limit use module defaults
 }
 
@@ -231,6 +232,28 @@ resource "aws_iam_role_policy" "ecs_task" {
   })
 }
 
+# ── Observability (CloudWatch alarms, SNS alerts, dashboard) ─────────────────
+#
+# Depends on ecs_service (cluster/service names, ALB suffix) and data (RDS id).
+
+module "observability" {
+  source = "../../modules/observability"
+
+  project_name = var.project_name
+  environment  = var.environment
+  alert_email  = var.alert_email
+
+  ecs_cluster_name = module.ecs_service.ecs_cluster_name
+  ecs_service_name = module.ecs_service.ecs_service_name
+
+  alb_arn_suffix = module.ecs_service.alb_arn_suffix
+  tg_arn_suffix  = module.ecs_service.tg_arn_suffix
+
+  rds_instance_identifier = module.data.db_instance_identifier
+
+  log_group_name = module.ecs_service.log_group_name
+}
+
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 #
 # AWS/Billing metrics are only available in us-east-1 regardless of deployment
@@ -250,6 +273,12 @@ resource "aws_iam_role_policy" "ecs_task" {
 resource "aws_sns_topic" "billing_alarm" {
   name = "${local.prefix}-billing-alarm"
   tags = local.tags
+}
+
+resource "aws_sns_topic_subscription" "billing_alarm_email" {
+  topic_arn = aws_sns_topic.billing_alarm.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
 }
 
 resource "aws_cloudwatch_metric_alarm" "billing" {

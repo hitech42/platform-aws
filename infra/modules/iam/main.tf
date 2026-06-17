@@ -550,12 +550,82 @@ resource "aws_iam_role_policy" "github_deploy" {
         Resource = "arn:aws:logs:*:*:log-group:/ecs/${var.project_name}-*"
       },
 
-      # TODO (E4): add for CloudWatch metrics + alarms + billing notifications:
-      #   cloudwatch:PutMetricAlarm, cloudwatch:DeleteAlarms,
-      #   cloudwatch:DescribeAlarms, cloudwatch:PutDashboard,
-      #   sns:CreateTopic, sns:DeleteTopic, sns:SetTopicAttributes,
-      #   sns:GetTopicAttributes, sns:TagResource,
-      #   logs:PutMetricFilter, logs:DeleteMetricFilter
+      # ── 12. CloudWatch alarms ─────────────────────────────────────────────────
+      #
+      # PutMetricAlarm / DeleteMetricAlarm / DescribeAlarms scoped to alarm names
+      # matching the project prefix. DescribeAlarms also accepts Resource="*" in
+      # some SDK calls but the ARN scope covers all practical uses here.
+      {
+        Sid    = "CWAlarmsManage"
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricAlarm",
+          "cloudwatch:DeleteAlarms",
+          "cloudwatch:DescribeAlarms",
+          "cloudwatch:DescribeAlarmsForMetric",
+        ]
+        Resource = "arn:aws:cloudwatch:*:*:alarm:${var.project_name}-*"
+      },
+
+      # ── 13. CloudWatch dashboards ─────────────────────────────────────────────
+      #
+      # Dashboard ARNs use the format arn:aws:cloudwatch::account:dashboard/Name
+      # (no region in the ARN — dashboards are global within an account).
+      # We scope to names starting with the project name in PascalCase (CVSPlatform*).
+      {
+        Sid    = "CWDashboardsManage"
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutDashboard",
+          "cloudwatch:DeleteDashboards",
+          "cloudwatch:GetDashboard",
+          "cloudwatch:ListDashboards",
+        ]
+        Resource = "arn:aws:cloudwatch::*:dashboard/CVSPlatform*"
+      },
+
+      # ── 14. CloudWatch Logs metric filters ────────────────────────────────────
+      #
+      # Scoped to the same /ecs/{project_name}-* prefix as CWLogsManage above.
+      # DescribeMetricFilters has no resource-level restriction in IAM (AWS limitation)
+      # so it requires Resource="*"; mutating actions are log-group-scoped.
+      {
+        Sid      = "CWLogsMetricFiltersDescribe"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeMetricFilters"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CWLogsMetricFiltersManage"
+        Effect = "Allow"
+        Action = [
+          "logs:PutMetricFilter",
+          "logs:DeleteMetricFilter",
+        ]
+        Resource = "arn:aws:logs:*:*:log-group:/ecs/${var.project_name}-*"
+      },
+
+      # ── 15. SNS — alert topics ────────────────────────────────────────────────
+      #
+      # Scoped to topic ARNs matching the project prefix. Subscribe / Unsubscribe
+      # are needed so Terraform can manage the email subscription resource.
+      # sns:TagResource uses the topic ARN (not a subscription ARN) — same scope.
+      {
+        Sid    = "SNSAlertsManage"
+        Effect = "Allow"
+        Action = [
+          "sns:CreateTopic",
+          "sns:DeleteTopic",
+          "sns:GetTopicAttributes",
+          "sns:SetTopicAttributes",
+          "sns:TagResource",
+          "sns:ListTagsForResource",
+          "sns:Subscribe",
+          "sns:Unsubscribe",
+          "sns:ListSubscriptionsByTopic",
+        ]
+        Resource = "arn:aws:sns:*:*:${var.project_name}-*"
+      },
 
     ]
   })

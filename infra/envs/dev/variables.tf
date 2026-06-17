@@ -78,6 +78,14 @@ variable "db_username" {
   default     = "platform_app"
 }
 
+# ── Observability ─────────────────────────────────────────────────────────────
+
+variable "alert_email" {
+  description = "Email address for operational alert SNS subscriptions. Requires manual confirmation after apply."
+  type        = string
+  sensitive   = true
+}
+
 # ── Billing alarm ─────────────────────────────────────────────────────────────
 
 variable "billing_alarm_threshold" {

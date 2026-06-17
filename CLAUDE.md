@@ -226,6 +226,27 @@ Example CloudWatch Logs metric filter patterns:
 
 **Do not implement actual CloudWatch API calls in application code** — metric filters on the log group are the ops-team's responsibility and keep the app free of CloudWatch SDK dependencies.
 
+The full alerting chain is realized in `infra/modules/observability/main.tf`:
+
+```
+structlog event (app/src/api/v1/secret_requests.py)
+  → awslogs driver → CloudWatch Logs (/ecs/cvs-platform-dev)
+  → aws_cloudwatch_log_metric_filter (CVSPlatform/Application::SecretProvisioningFailures)
+  → aws_cloudwatch_metric_alarm (cvs-platform-dev-secret-provisioning-failures)
+  → aws_sns_topic (cvs-platform-dev-alerts)
+  → email to alert_email (terraform.tfvars)
+```
+
+### CloudWatch alarms and dashboard
+
+`infra/modules/observability/` provisions:
+
+- **9 metric alarms**: ECS CPU + memory, RDS CPU + storage + connections, ALB 5xx + p95 latency + healthy-host count, custom SecretProvisioningFailures — all routed to the `cvs-platform-dev-alerts` SNS topic.
+- **1 CloudWatch dashboard**: `CVSPlatformDev` — 7 widgets covering all alarm metrics. URL available as the `dashboard_url` Terraform output.
+- **Separate SNS topics**: `cvs-platform-dev-alerts` (operational, in the observability module) and `cvs-platform-dev-billing-alarm` (cost governance, root-level in envs/dev). See ADR-013.
+
+After `terraform apply`, confirm the email subscription for `cvs-platform-dev-alerts` (separate from the billing alarm subscription). Alarms that fire before confirmation are silently dropped.
+
 ### structlog processor list stability
 
 `configure_logging()` maintains a module-level `_PROCESSORS` list that is always cleared and repopulated **in place**. This is required because `structlog.testing.capture_logs()` modifies `get_config()["processors"]` in place, and `cache_logger_on_first_use=True` causes bound loggers to hold a reference to the list object passed at `configure()` time. If `configure_logging()` created a new list each call, cached loggers would hold a stale reference that `capture_logs()` would never modify.
@@ -283,13 +304,19 @@ infra/
 │   │   ├── variables.tf
 │   │   ├── outputs.tf
 │   │   └── tests/kms.tftest.hcl
-│   └── data/           ← RDS PostgreSQL (db.t4g.micro, free-tier), subnet group
+│   ├── data/           ← RDS PostgreSQL (db.t4g.micro, free-tier), subnet group
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── tests/data.tftest.hcl
+│   └── observability/  ← SNS alerts topic, 9 CW alarms, metric filter, dashboard
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
-│       └── tests/data.tftest.hcl
+│       ├── dashboard.json.tftpl
+│       └── tests/observability.tftest.hcl
 └── envs/
-    └── dev/            ← root module wiring network + iam + kms + data
+    └── dev/            ← root module wiring network + iam + kms + data + observability
         ├── backend.tf
         ├── providers.tf
         ├── main.tf     ← also contains aws_iam_role_policy.ecs_task + billing alarm
@@ -321,7 +348,7 @@ The GitHub Actions deploy role (`{project_name}-{environment}-github-deploy`) is
 | E1 (done) | S3 (state backend), EC2 VPC/subnet/SG/IGW/route-table, IAM OIDC + scoped role management |
 | E2 (done) | RDS instance/subnet-group/snapshot (project-scoped ARNs), KMS CreateKey + alias + grant management, Secrets Manager platform/* + rds!* |
 | E3 (done) | ECS, ECR, ALB |
-| E4 (done) | CloudWatch Logs/metrics |
+| E4 (done) | CloudWatch alarms, metric filter, dashboard, SNS alerts topic (infra/modules/observability) |
 
 `ec2:Describe*` and VPC-mutate actions use `Resource: "*"` because EC2 does not support resource-level ARNs for Describe operations, and tag-based conditions require the resources to exist before the policy can reference them. Add tag-based conditions in staging/prod once VPC IDs are known (see TODO in `infra/modules/iam/main.tf`).
 
@@ -356,8 +383,10 @@ All tests use `mock_provider "aws" {}` — no real AWS credentials required.
 - **KMS tests** (`command = apply` for key_policy_principals): `data.aws_caller_identity.current.account_id` is needed to assert the key policy — must use `override_data` to supply a known account ID.
 - **Data tests** (`command = plan`): all assertions target attributes set directly in HCL (not computed by AWS), so plan-time values are sufficient.
 - **envs/dev tests** (`command = apply`): module.kms and module.data are `override_module`'d to supply valid-format ARNs — the mock provider returns non-ARN strings for computed outputs, which fails ARN validation in downstream resources.
+- **Observability tests** (`command = apply` for alarm_actions, `command = plan` for thresholds/periods): `aws_sns_topic.alerts.arn` is a computed value — `override_resource` is required to supply a valid fake ARN so that `alarm_actions` and `topic_arn` pass ARN validation. Plan runs (threshold, period, topic-name assertions) do not need it because those attributes are set in HCL.
 - **Override `data.aws_availability_zones.available`**: every network test run must supply `override_data` with mock AZ names — the mock provider returns `null` for unset list attributes, which causes `element()` to panic.
 - **`coalesce(value, [])`**: wrap mock-provider list attributes that may be `null` (e.g., `cidr_blocks`, `ipv6_cidr_blocks` on security group rules) before calling `length()`.
+- **Provider version pinning**: each module directory contains `.terraform.lock.hcl` pinning the AWS provider at `5.100.0`. When adding a new module, copy the lock file from an existing module before running `terraform test` — without it, `terraform init` downloads the latest version (currently 6.x), which may introduce deprecations or breaking changes.
 
 To run tests:
 
@@ -367,12 +396,13 @@ terraform -chdir=infra/modules/network test
 terraform -chdir=infra/modules/iam test
 terraform -chdir=infra/modules/kms test
 terraform -chdir=infra/modules/data test
+terraform -chdir=infra/modules/observability test
 
 # envs/dev root module
 terraform -chdir=infra/envs/dev test
 
-# All at once (23 tests total)
-for d in infra/modules/network infra/modules/iam infra/modules/kms infra/modules/data infra/envs/dev; do
+# All at once (32 tests total)
+for d in infra/modules/network infra/modules/iam infra/modules/kms infra/modules/data infra/modules/observability infra/envs/dev; do
   terraform -chdir="$d" test
 done
 ```
