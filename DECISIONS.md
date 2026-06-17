@@ -394,3 +394,91 @@ Bootstrap script (`infra/scripts/setup-db-user.sh`) switches from `aws rds-data 
 - **No automatic scaling**: `db.t4g.micro` is a fixed instance class. If the workload grows, an instance resize is required (`ModifyDBInstance` with a brief maintenance window). Acceptable for an internal tool at dev scale.
 - **Bootstrap requires VPC access**: the Data API allowed running `CREATE USER` from any machine with IAM credentials. Standard RDS has no Data API; the bootstrap script now requires TCP access to port 5432 from within the VPC. In dev, the operator needs either an EC2 bastion, SSM port forwarding, or a one-off ECS Fargate task (natural option after E3). This is documented in `infra/scripts/setup-db-user.sh`.
 - **No reader endpoint**: `aws_db_instance` exposes a single endpoint. For staging/prod, consider a Multi-AZ deployment or a read replica with its own endpoint.
+
+---
+
+## ADR-013: Separate SNS Topics for Billing Alarms vs. Operational Alerts
+
+**Date**: 2026-06-17
+**Status**: Accepted
+
+### Context
+
+The platform has two categories of operational alarm: a billing alarm (spend > $10/month) and nine service-health alarms (CPU, memory, storage, latency, errors, availability, provisioning failures). These could share a single SNS topic or use separate topics.
+
+### Decision
+
+Use **two separate SNS topics**: `cvs-platform-dev-billing-alarm` (created in `envs/dev/main.tf`) and `cvs-platform-dev-alerts` (created in `modules/observability/main.tf`).
+
+### Rationale
+
+- **Different subscribers**: billing watchers (finance / account owner) and on-call engineers are different people. A shared topic either wakes up engineers for billing threshold events or sends service outage alerts to finance — both are noise for the recipient.
+- **Different urgency**: a billing breach at 2 AM is not actionable until business hours. A zero-healthy-hosts alarm at 2 AM requires immediate response. Mixing them into one subscriber list forces everyone onto the same escalation policy.
+- **Independent subscription lifecycle**: adding a PagerDuty webhook for operational alerts should not affect billing alert delivery, and vice versa. Separate topics make each subscription independently manageable.
+- **Module boundary**: the billing alarm is a root-level resource in `envs/dev` (cost governance at the account level). Operational alerts belong inside the observability module (service health). Co-locating them in one topic would blur that boundary and make the billing alarm depend on the observability module.
+
+### Trade-offs
+
+- **Two confirmation emails**: after `terraform apply`, the operator must confirm two SNS subscriptions. Documented in `README.md` Step 6.
+- **One more resource**: an extra SNS topic costs nothing (SNS topics are free; charges are per message). The operational cost is zero.
+
+---
+
+## ADR-014: CloudWatch Logs Metric Filter as the App↔Infra Alerting Bridge
+
+**Date**: 2026-06-17
+**Status**: Accepted
+
+### Context
+
+The application needs to signal provisioning failures to the operations team. Several options exist:
+
+1. **Direct CloudWatch metric from the app**: `boto3` PutMetricData call inside `approve()`. Couples the app to CloudWatch SDK; adds a network call on the hot path; requires extra IAM permissions on the task role.
+2. **CloudWatch Logs metric filter**: Terraform resource that reads structured log lines already written by structlog and increments a custom metric. No app code changes required.
+3. **Lambda triggered by log subscription**: more powerful but far more infrastructure for a simple counter.
+
+### Decision
+
+Use a **CloudWatch Logs metric filter** (`aws_cloudwatch_log_metric_filter`) that matches the structured JSON log event `{ $.event = "secret_provisioning_outcome" && $.outcome = "failed" }` already emitted by the `approve` route via structlog. The filter increments `CVSPlatform/Application::SecretProvisioningFailures` by 1 per match.
+
+### Rationale
+
+- **No app code changes**: the app already calls `log.warning("secret_provisioning_outcome", outcome="failed", ...)` — structlog renders this as JSON that CloudWatch can parse. The metric filter is purely infrastructure.
+- **Clean separation of concerns**: the app's responsibility is to emit the right log event; infra's responsibility is to turn log events into metrics and alarms. Neither layer intrudes on the other.
+- **CLAUDE.md design intent realized**: the observability section of CLAUDE.md described this exact full chain (`structlog event → awslogs → metric filter → alarm → SNS → email`). The metric filter is the realization of the "Do not implement actual CloudWatch API calls in application code" rule.
+- **Lower latency than PutMetricData**: metric filter data is available within ~1 minute of the log line appearing in CloudWatch (same as any log delivery delay). This is fast enough for the alarm's 5-minute evaluation window.
+
+### Trade-offs
+
+- **Log delivery lag**: if the ECS task is terminated before the log driver flushes its buffer, the last few log lines may be lost. Acceptable: a lost provisioning-failure log means no alarm, but the request's FAILED status in the database is durable (committed before the log call). Ops can query the DB to detect silent failures.
+- **Filter pattern fragility**: if the structlog event name or the `outcome` key ever changes, the metric filter stops matching and the alarm never fires. The filter pattern and the log.warning call are tested together in integration tests; the filter string is documented in CLAUDE.md.
+
+---
+
+## ADR-015: p95 Latency as the ALB Latency SLI (Not Average)
+
+**Date**: 2026-06-17
+**Status**: Accepted
+
+### Context
+
+The ALB latency alarm needs a statistic to compare against the 2-second threshold. Two candidates:
+
+1. **Average** (`statistic = "Average"`): the mean response time over the evaluation period.
+2. **p95** (`extended_statistic = "p95"`): the 95th-percentile response time — the slowest response experienced by 1 in 20 requests.
+
+### Decision
+
+Use **`extended_statistic = "p95"`** on the `alb_latency_p95` alarm with `threshold = 2.0` seconds.
+
+### Rationale
+
+- **Average hides tail latency**: if 5% of requests take 10 seconds but 95% complete in 200 ms, the average may be well under 2 seconds and the alarm never fires — despite 1 in 20 users experiencing an unacceptable wait. Averages systematically hide the worst user experience.
+- **p95 is a standard SLI**: SRE practice uses percentile latency (p50, p95, p99) as the primary latency signal because it characterises the distribution, not just the center. Google SRE Book uses p99 as the canonical SLO metric; p95 is a reasonable threshold for an internal tool with no formal SLA.
+- **Secrets Manager calls cause bimodal distribution**: the `approve` endpoint makes a Secrets Manager API call synchronously. Slow SM calls (cold-start, throttling, network hiccup) produce a bimodal response-time distribution: a fast cluster (~200ms) and a slow tail (1–10s). p95 catches the tail; average does not.
+- **`extended_statistic` is the correct Terraform attribute**: CloudWatch percentile statistics are not `statistic` values — they require the `extended_statistic` argument (e.g. `"p95"`, `"p99.9"`). Using `statistic = "p95"` would be silently ignored or rejected.
+
+### Trade-offs
+
+- **p95 is noisier than average**: a single slow batch of requests can push p95 above threshold without a genuine latency problem. Mitigated by requiring 2 consecutive evaluation periods (`evaluation_periods = 2`) before the alarm fires.
+- **`treat_missing_data = "notBreaching"`**: when there is no traffic (no data points), the alarm stays OK rather than entering INSUFFICIENT_DATA and paging on-call. This is correct for an internal tool with intermittent traffic but means a complete traffic blackout would not trigger the alarm — the `alb_healthy_hosts` alarm covers that case.
