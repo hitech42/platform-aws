@@ -14,6 +14,9 @@ locals {
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+  # Empty string is the sentinel for "use project_name" — mirrors the same
+  # pattern in modules/iam to keep both modules in sync on ECR naming.
+  ecr_repo_name = var.ecr_repository_name != "" ? var.ecr_repository_name : var.project_name
 }
 
 # ── ECR Repository ────────────────────────────────────────────────────────────
@@ -25,7 +28,7 @@ locals {
 # "latest" is never used in production task definitions for this reason.
 
 resource "aws_ecr_repository" "app" {
-  name                 = var.project_name
+  name                 = local.ecr_repo_name
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {

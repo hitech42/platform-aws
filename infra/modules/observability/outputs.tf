@@ -4,6 +4,6 @@ output "alerts_topic_arn" {
 }
 
 output "dashboard_name" {
-  description = "Name of the CloudWatch dashboard (used to build the console URL in envs/dev/outputs.tf). Added in Stage 3."
-  value       = "CVSPlatformDev"
+  description = "Name of the CloudWatch dashboard (used to build the console URL in envs/*/outputs.tf)."
+  value       = "CVSPlatform${title(var.environment)}"
 }

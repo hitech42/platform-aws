@@ -482,3 +482,237 @@ Use **`extended_statistic = "p95"`** on the `alb_latency_p95` alarm with `thresh
 
 - **p95 is noisier than average**: a single slow batch of requests can push p95 above threshold without a genuine latency problem. Mitigated by requiring 2 consecutive evaluation periods (`evaluation_periods = 2`) before the alarm fires.
 - **`treat_missing_data = "notBreaching"`**: when there is no traffic (no data points), the alarm stays OK rather than entering INSUFFICIENT_DATA and paging on-call. This is correct for an internal tool with intermittent traffic but means a complete traffic blackout would not trigger the alarm — the `alb_healthy_hosts` alarm covers that case.
+
+---
+
+## ADR-016: Separate ECR Repository Per Environment
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+Container images built from the same commit need to reach different environments (dev, staging). Options:
+
+1. **Shared ECR repository, environment-tagged images**: `cvs-platform:dev-<sha>`, `cvs-platform:staging-<sha>`. One repo, tag prefix per environment.
+2. **Separate ECR repository per environment**: `cvs-platform` (dev), `cvs-platform-staging` (staging). Separate IAM policies per repo.
+
+### Decision
+
+Use **a separate ECR repository per environment**, named `{project_name}-{environment}`. The dev environment already owns `cvs-platform`; staging provisions `cvs-platform-staging` via its own `module.ecs_service` call.
+
+### Rationale
+
+- **Least-privilege IAM**: the staging deploy role can be scoped to `cvs-platform-staging` only, and the dev deploy role to `cvs-platform` only. With a shared repo, both roles would need access to the same ARN and tag-based restrictions on ECR are cumbersome.
+- **No accidental overwrite**: a push from `develop` cannot overwrite a staging image because the two push targets are different repositories. With a shared repo and the same commit SHA as the tag, a concurrent push from both branches would be a no-op, but the risk of a bad tag convention producing a collision grows as the team scales.
+- **Clear lifecycle ownership**: staging images are deleted in `terraform-destroy-staging.yml` (which lists images in `cvs-platform-staging`) without any risk of touching dev images.
+- **Symmetric with all other environment-scoped resources**: ECS cluster, service, task family, log group, and RDS instance all follow the `{project_name}-{environment}` naming pattern. ECR following the same pattern keeps the convention uniform.
+
+### Trade-offs
+
+- **Images are rebuilt, not promoted**: the same application commit is built twice (once per environment push). There is no "promote this exact image binary to staging." In practice the Dockerfile is deterministic and the two builds produce identical layer content (modulo build timestamp metadata). For strict binary promotion, a more advanced pipeline would tag the dev image with `staging` rather than rebuilding.
+- **More repos as environments multiply**: each new environment adds one ECR repository. Manageable at the current scale (dev + staging); if many ephemeral preview environments are needed, a different strategy (shared repo with environment prefix tags) would be revisited.
+
+---
+
+## ADR-017: GitHub OIDC Provider as Account-Wide Singleton
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+The IAM module creates a GitHub Actions OIDC identity provider (`aws_iam_openid_connect_provider`) when `create_oidc_provider = true`. The dev environment applies this with `create_oidc_provider = true`. When the staging environment module was added, the same module was called again.
+
+AWS restricts OIDC providers to **one per issuer URL per account**. Attempting to create a second `aws_iam_openid_connect_provider` for `token.actions.githubusercontent.com` in the same account fails with `EntityAlreadyExists`.
+
+### Decision
+
+Set `create_oidc_provider = false` in `infra/envs/staging/main.tf`. The IAM module branches on this variable: when `false`, it skips the `aws_iam_openid_connect_provider` resource and uses an `aws_iam_openid_connect_provider` data source (lookup by URL) instead. The resulting provider ARN is the same resource in both environments.
+
+### Rationale
+
+- **AWS constraint is absolute**: creating two OIDC providers for the same URL is not supported. Any approach that tries to create the resource in staging would fail on a real account.
+- **The provider is not environment-specific**: GitHub's OIDC issuer is a single global endpoint. The IAM trust policy condition (`sub` claim) is what restricts which branch can assume which role — not the provider itself.
+- **Single source of truth**: the dev apply creates the provider; every subsequent environment applies only reference it.
+
+### Trade-offs
+
+- **Staging depends on dev having been applied first**: if the dev environment is destroyed (including the OIDC provider), the staging module's data source lookup will fail on the next `terraform plan`. In practice, the OIDC provider would be re-created with dev before staging is re-applied.
+- **Variable convention must be documented**: `create_oidc_provider = false` is non-obvious. The comment in `infra/envs/staging/main.tf` and this ADR provide the explanation. Any new environment must also set this to `false`.
+
+---
+
+## ADR-018: Staging Data Protection — deletion_protection and Final Snapshot
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+The dev environment configures its RDS instance with `deletion_protection = false` and `skip_final_snapshot = true` to enable fast teardown (`terraform destroy` works without any pre-steps). Staging is a stable, longer-lived environment; the risk posture is different.
+
+### Decision
+
+In `infra/envs/staging/main.tf`, set:
+- `deletion_protection = true` — `terraform destroy` fails until this is explicitly lifted.
+- `skip_final_snapshot = false` — AWS retains a final snapshot when the instance is deleted.
+
+The automated destroy workflow (`terraform-destroy-staging.yml`) handles the lifecycle: it calls `aws rds modify-db-instance --no-deletion-protection` and waits for the instance to become available before running `terraform destroy`.
+
+### Rationale
+
+- **Guard against accidents**: `deletion_protection = true` means a mistyped `terraform destroy` in the wrong terminal window cannot delete the staging database. The Terraform apply would succeed in disabling protection only if the operator intends it.
+- **Data recovery path**: `skip_final_snapshot = false` retains the last RDS snapshot. If staging holds seed data, integration test fixtures, or data needed to reproduce a bug, the snapshot preserves it without requiring a manual pre-destroy backup step.
+- **The dev pattern is inappropriate for staging**: dev teardowns are frequent (experimenting, testing Terraform changes). Dev data is ephemeral. Staging teardowns are intentional, infrequent operations where the cost of an extra pre-step is low and the cost of data loss is higher.
+
+### Trade-offs
+
+- **Multi-step destroy**: the automated destroy workflow adds an AWS CLI step before `terraform destroy`. Without the workflow, a manual operator must remember to disable deletion protection first. The workflow makes the correct order the default.
+- **Final snapshot storage cost**: the snapshot incurs standard RDS snapshot storage charges (currently $0.095/GB-month). At 20 GiB, this is ~$1.90/month until the snapshot is manually deleted. Acceptable for the recovery insurance it provides.
+- **Snapshot not cleaned up by the workflow**: `terraform destroy` does not delete the final snapshot (by design — that is the point of `skip_final_snapshot = false`). An operator must delete it manually in the console or via CLI after confirming it is no longer needed.
+
+---
+
+## ADR-019: No Billing Alarm in the Staging Environment
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+The dev environment provisions a billing alarm on `AWS/Billing::EstimatedCharges` that fires when the estimated monthly spend exceeds $10. When the staging environment was being designed, the question arose whether staging should have its own billing alarm.
+
+### Decision
+
+**No billing alarm in the staging environment.** The billing alarm is provisioned only in `infra/envs/dev/main.tf`. The `infra/modules/observability/` module does not include a billing alarm. The staging `main.tf` notes the omission explicitly in a comment.
+
+### Rationale
+
+- **`EstimatedCharges` is account-level, not per-environment**: the CloudWatch metric `AWS/Billing::EstimatedCharges` counts all charges across the entire AWS account. There is no "dev charges" vs "staging charges" dimension in this metric — both alarms would watch the exact same number.
+- **Two alarms on the same metric fire simultaneously**: if the billing threshold is crossed, both the dev alarm and a hypothetical staging alarm would transition to `ALARM` at the same moment, sending two notifications to possibly the same email address. This is pure noise with no additional information.
+- **The billing alarm is a root-level concern, not a module concern**: billing governance is an account-level responsibility, not tied to a specific environment's infrastructure. It belongs in the root `envs/dev` configuration (which owns the AWS account's primary cost settings) rather than in a reusable module.
+
+### Trade-offs
+
+- **No per-environment cost breakdown via alarm**: if staging is substantially more expensive than dev (e.g., due to larger instance class or more traffic), there is no alarm specifically tied to staging spend. Mitigated by AWS Cost Explorer and tag-based cost allocation (all staging resources are tagged `Environment=staging`).
+
+---
+
+## ADR-020: Parameterized CI/CD Workflows (Single File Per Concern, Branch-Driven)
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+With two environments (dev and staging), CI/CD workflows need to build, push, and deploy to both. Options:
+
+1. **Duplicate workflow files**: `app-build-push-dev.yml` and `app-build-push-staging.yml`. Simple conditional logic; easy to read per file. Risk: drift between the two files over time.
+2. **Single parameterized workflow**: one `app-build-push.yml` that branches on `github.ref_name`. More complex conditionals; no duplication risk.
+
+### Decision
+
+Use **single parameterized workflow files** per concern:
+- `app-build-push.yml` triggers on pushes to `develop` or `staging`, uses `github.ref_name` to set `environment:` and `ECR_REPOSITORY`.
+- `app-deploy.yml` triggers on `workflow_run` completion on `develop` or `staging`, uses a "Resolve deployment target" shell script step to derive `ECR_REPOSITORY`, `ECS_CLUSTER`, `ECS_SERVICE`, and `TASK_FAMILY` from the triggering branch.
+
+### Rationale
+
+- **No drift**: a bug fix in the build or deploy logic is applied to both environments in a single commit. With duplicate files, one file is typically updated and the other is forgotten until a divergence causes a subtle prod-vs-staging difference.
+- **Smaller diff surface**: adding a third environment (e.g., prod) requires adding one branch to an existing conditional, not duplicating an entire workflow file.
+- **GitHub Actions supports expressions in `environment:`**: `environment: ${{ github.ref_name == 'staging' && 'staging' || 'dev' }}` is evaluated before the job runs — this is what determines which `AWS_DEPLOY_ROLE_ARN` variable is read. This capability was confirmed before choosing the parameterized approach.
+
+### Known complexity: `workflow_run` vs `workflow_dispatch` branch detection
+
+`workflow_run` events expose the triggering branch as `github.event.workflow_run.head_branch`. `workflow_dispatch` (manual rollback) exposes it as `github.ref_name`. These can't be unified in a single job-level expression without a shell step, because `workflow_dispatch` does not populate `github.event.workflow_run.head_branch`.
+
+Solution: the `app-deploy.yml` "Resolve deployment target" step evaluates `BRANCH="${{ github.event.workflow_run.head_branch || github.ref_name }}"` and writes the derived resource names to `$GITHUB_ENV`. All subsequent steps read simple variable names. The `environment:` job attribute uses the same ternary expression; any residual mismatch at the job level is benign because OIDC's `sub` claim restricts which role the staging environment can assume.
+
+### Trade-offs
+
+- **Conditionals add cognitive load**: a reader must understand the ternary logic to know what runs for which branch. Mitigated by inline comments in both workflow files.
+- **`workflow_dispatch` branch ambiguity**: if an operator manually triggers `app-deploy.yml` from the `staging` branch, `github.ref_name` resolves correctly. If they trigger it from a feature branch, the deployment defaults to `dev` — which may be unexpected. The workflow is primarily triggered automatically; manual use is documented as a rollback tool that the operator should invoke from the correct branch.
+
+---
+
+## ADR-021: Staged Destroy Workflow for Staging Environment
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+`terraform destroy` on the staging environment fails for three independent reasons if run naively:
+
+1. **ECS tasks mid-request**: destroying the ALB and subnets while tasks are running causes connection resets.
+2. **RDS `deletion_protection = true`** (ADR-018): Terraform cannot delete the instance until this is lifted.
+3. **Non-empty ECR repository**: `aws_ecr_repository` does not set `force_delete = true`, so Terraform aborts with `RepositoryNotEmptyException` if images exist.
+
+Additionally, app-created Secrets Manager secrets (under `platform/*/staging/*`) are not in Terraform state and would be orphaned without explicit cleanup.
+
+### Decision
+
+Provision a manual-only GitHub Actions workflow (`terraform-destroy-staging.yml`) that performs a **staged teardown** in the correct order:
+
+1. Scale ECS service to 0 and wait for drain.
+2. Disable RDS deletion protection via CLI and wait for the instance to become available.
+3. Delete all ECR images from the repository.
+4. (Opt-in) Delete app-created Secrets Manager secrets under `platform/*/staging/*`.
+5. Run `terraform destroy`.
+
+A `confirm` text input (`"destroy-staging"`) is required to prevent accidental runs.
+
+### Rationale
+
+- **Order is non-negotiable**: if destroy runs before deletion_protection is lifted, Terraform fails partway through and leaves the environment in a partially-destroyed state. Each step unblocks the next.
+- **Operator-initiated, not automated**: staging teardown is an intentional, rare operation. It should require a human decision, not fire automatically on branch delete or PR merge.
+- **Opt-in secrets cleanup**: runtime secrets are valuable for forensics (verifying what was provisioned). Making deletion opt-in preserves them by default while providing a clean mechanism for full teardown when desired. The filter `split("/")[2] == "staging"` scopes deletion to staging secrets only, leaving dev secrets intact if both environments share an account.
+- **Confirmation input as safety gate**: `"destroy-staging"` as the confirmation string makes accidental runs improbable. The workflow fails immediately if the input does not match exactly.
+
+### Trade-offs
+
+- **Not idempotent if steps partially fail**: if step 2 (disable deletion_protection) fails, re-running the workflow attempts step 1 again (scale to 0, already 0 — safe no-op) and then step 2. The `aws rds wait` command makes step 2 idempotent. However, if step 3 or 4 fails mid-loop, a partial run may leave some images or secrets requiring manual cleanup.
+- **ECR pagination**: `aws ecr list-images` returns up to 1000 results in JSON before paging. `aws ecr batch-delete-image` accepts up to 100 image IDs. The workflow does not implement pagination — if staging ECR accumulates more than 100 images, extra manual cleanup may be needed.
+- **`force_delete` not set on ECR resource**: the alternative would be `force_delete = true` on the Terraform resource, which would auto-delete images on `terraform destroy`. This was rejected because it bypasses the ordered teardown and could silently delete images before other resources that depend on the most recent image are cleanly removed.
+
+---
+
+## ADR-022: Module Outputs for Terraform Test Assertions
+
+**Date**: 2026-06-13
+**Status**: Accepted
+
+### Context
+
+`terraform test` assertions in a root module can only reference **declared outputs** of child modules — not internal resource attributes. During the staging test suite implementation, several assertions were initially written against module-internal paths:
+
+```hcl
+# These all fail: "module.X is object with N attributes / does not have attribute Y"
+module.data.aws_db_instance.postgres.deletion_protection
+module.ecs_service.aws_cloudwatch_log_group.app.retention_in_days
+module.iam.aws_iam_role.github_deploy.assume_role_policy
+```
+
+This is correct module encapsulation behavior, not a Terraform bug.
+
+### Decision
+
+Add outputs to each module for any attribute that test suites need to assert on:
+- `infra/modules/data/outputs.tf`: `deletion_protection`, `skip_final_snapshot`
+- `infra/modules/ecs-service/outputs.tf`: `log_retention_days`
+- `infra/modules/iam/outputs.tf`: `allowed_refs`
+
+Assert on `module.X.output_name` in test HCL instead of internal paths.
+
+### Rationale
+
+- **Outputs are the correct module interface**: in Terraform, a module's public surface is its outputs. Adding testability outputs is architecturally correct — it explicitly declares that these values are part of the module's contract with callers.
+- **The outputs are genuinely useful to callers**: `deletion_protection` on the data module lets a root module (e.g., a destroy automation) know whether a pre-destroy step is needed. `log_retention_days` could be surfaced to operators or compared across environments. `allowed_refs` is useful to an ops script verifying branch isolation. These are not test-only scaffolding.
+- **Alternative — testing internal state via `terraform show`**: parsing JSON from `terraform show -json` inside a test is fragile and not how `terraform test` is designed to be used.
+- **Alternative — testing from outside the module**: writing tests that instantiate individual resources directly (not via the module) would duplicate the module's logic in the test configuration, creating drift.
+
+### Trade-offs
+
+- **Slightly more outputs per module**: each module now exposes a few more attributes. The outputs are descriptive and low-noise — they do not expose secrets or internal ARNs that should not be visible.
+- **Tests couple to module output names**: renaming an output (e.g., `deletion_protection` → `rds_deletion_protection`) breaks test assertions. This is acceptable — output names are part of the module's public API and are versioned with the same care as resource attributes.

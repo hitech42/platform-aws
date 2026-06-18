@@ -27,3 +27,8 @@ output "oidc_provider_arn" {
   description = "ARN of the GitHub OIDC provider (created or looked up). Useful for adding trust policies to future roles."
   value       = local.oidc_provider_arn
 }
+
+output "allowed_refs" {
+  description = "GitHub ref patterns allowed to assume this environment's deploy role. Env-level tests assert on this to verify branch isolation between environments."
+  value       = var.allowed_refs
+}

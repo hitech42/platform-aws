@@ -47,3 +47,8 @@ output "tg_arn_suffix" {
   description = "Target group ARN suffix (e.g. 'cvs-platform-dev/abc123'). Required for HealthyHostCount and other target-level ALB CloudWatch metrics."
   value       = aws_lb_target_group.app.arn_suffix
 }
+
+output "log_retention_days" {
+  description = "CloudWatch log retention in days for this environment's ECS log group. Dev=7, staging=14+."
+  value       = aws_cloudwatch_log_group.app.retention_in_days
+}
