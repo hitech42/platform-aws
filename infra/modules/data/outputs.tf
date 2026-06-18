@@ -37,3 +37,13 @@ output "master_secret_arn" {
   description = "ARN of the RDS-managed master credential secret in Secrets Manager. For break-glass / administrative access only — the app never uses this credential."
   value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
 }
+
+output "deletion_protection" {
+  description = "Whether deletion protection is enabled. false in dev (clean destroy), true in staging/prod (requires explicit flip before destroy)."
+  value       = aws_db_instance.postgres.deletion_protection
+}
+
+output "skip_final_snapshot" {
+  description = "Whether the final snapshot is skipped on destroy. true in dev (no data to preserve), false in staging/prod (retains recoverable backup)."
+  value       = aws_db_instance.postgres.skip_final_snapshot
+}
