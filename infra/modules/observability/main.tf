@@ -73,7 +73,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory" {
 
   # Container Insights namespace — requires containerInsights=enabled on the cluster.
   namespace           = "ECS/ContainerInsights"
-  metric_name         = "MemoryUtilized"
+  metric_name         = "MemoryUtilization"
   dimensions          = { ClusterName = var.ecs_cluster_name, ServiceName = var.ecs_service_name }
   statistic           = "Average"
   period              = 300
