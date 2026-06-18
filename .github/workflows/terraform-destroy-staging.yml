@@ -1,0 +1,165 @@
+name: Infra - Destroy Staging
+
+# Manual-only workflow. Performs a safe, staged teardown of the staging
+# environment in the correct order:
+#
+#   1. Scale ECS service to 0      — drain in-flight requests
+#   2. Disable RDS deletion protection  — staging has deletion_protection=true
+#   3. Delete ECR images           — terraform destroy fails on non-empty repos
+#   4. Delete app secrets (opt-in) — Secrets Manager secrets created by the app
+#                                    at runtime are NOT in Terraform state
+#   5. terraform destroy           — remove all Terraform-managed resources
+#
+# A confirmation input is required to prevent accidental runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'destroy-staging' to confirm teardown"
+        required: true
+      delete_app_secrets:
+        description: "Delete app-created Secrets Manager secrets (platform/**/staging/**). These are NOT in Terraform state and will be orphaned if skipped."
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-east-1
+  # Resource identifiers — all follow the {project_name}-{environment} convention.
+  ECS_CLUSTER:   cvs-platform-staging
+  ECS_SERVICE:   cvs-platform-staging
+  DB_INSTANCE:   cvs-platform-staging-postgres
+  ECR_REPOSITORY: cvs-platform-staging
+
+jobs:
+  destroy:
+    name: Destroy staging environment
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # ── Safety gate ──────────────────────────────────────────────────────────
+      - name: Validate confirmation
+        run: |
+          if [[ "${{ github.event.inputs.confirm }}" != "destroy-staging" ]]; then
+            echo "ERROR: confirmation input must be exactly 'destroy-staging'."
+            echo "       Got: '${{ github.event.inputs.confirm }}'"
+            exit 1
+          fi
+          echo "Confirmed. Proceeding with staged teardown of the staging environment."
+
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── Step 1: drain ECS ────────────────────────────────────────────────────
+      # Scale to 0 before destroying infrastructure so no tasks are mid-request
+      # when the ALB, subnets, and security groups are removed.
+      - name: Scale down ECS service
+        run: |
+          echo "Scaling ${ECS_SERVICE} to 0 tasks..."
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service  "${ECS_SERVICE}" \
+            --desired-count 0 \
+            --no-cli-pager
+          echo "Waiting for tasks to drain..."
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
+          echo "ECS service drained."
+
+      # ── Step 2: disable RDS deletion protection ───────────────────────────────
+      # staging/main.tf sets deletion_protection=true so terraform destroy would
+      # fail without this step.  We modify the live instance via CLI; Terraform
+      # reads the drift at destroy time and proceeds with deletion.
+      - name: Disable RDS deletion protection
+        run: |
+          echo "Disabling deletion protection on ${DB_INSTANCE}..."
+          aws rds modify-db-instance \
+            --db-instance-identifier "${DB_INSTANCE}" \
+            --no-deletion-protection \
+            --apply-immediately \
+            --no-cli-pager
+          echo "Waiting for RDS instance to be available..."
+          aws rds wait db-instance-available \
+            --db-instance-identifier "${DB_INSTANCE}"
+          echo "Deletion protection disabled."
+
+      # ── Step 3: empty ECR repository ─────────────────────────────────────────
+      # aws_ecr_repository does not have force_delete=true, so terraform destroy
+      # fails with RepositoryNotEmptyException if images are present.
+      - name: Delete ECR images
+        run: |
+          echo "Listing images in ${ECR_REPOSITORY}..."
+          IMAGE_IDS=$(aws ecr list-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --query 'imageIds[*]' \
+            --output json)
+          if [[ "${IMAGE_IDS}" == "[]" ]]; then
+            echo "No images found — repository already empty."
+          else
+            echo "Deleting images..."
+            aws ecr batch-delete-image \
+              --repository-name "${ECR_REPOSITORY}" \
+              --image-ids "${IMAGE_IDS}" \
+              --no-cli-pager
+            echo "ECR images deleted."
+          fi
+
+      # ── Step 4 (opt-in): delete app-created Secrets Manager secrets ──────────
+      # The app creates secrets in Secrets Manager under platform/{service}/{env}/
+      # at provisioning time.  These are NOT managed by Terraform and will be
+      # orphaned after destroy if this step is skipped.
+      #
+      # Filter logic: list secrets whose name starts with "platform/", then
+      # select those where the 3rd path component (index 2) is "staging" —
+      # this scopes deletion to staging secrets only, leaving dev secrets intact.
+      #
+      # Note: list-secrets returns up to 100 results per page. If your staging
+      # environment has more than 100 app secrets, re-run this step or clean up
+      # the remainder manually.
+      - name: Delete app-created Secrets Manager secrets
+        if: ${{ github.event.inputs.delete_app_secrets == 'true' }}
+        run: |
+          echo "Listing app secrets for staging..."
+          ARNS=$(aws secretsmanager list-secrets \
+            --filters Key=name,Values="platform/" \
+            --output json \
+            | jq -r '.SecretList[]
+                      | select((.Name | split("/")[2]) == "staging")
+                      | .ARN')
+          if [[ -z "${ARNS}" ]]; then
+            echo "No staging app secrets found."
+          else
+            echo "${ARNS}" | while IFS= read -r arn; do
+              echo "  Deleting: ${arn}"
+              aws secretsmanager delete-secret \
+                --secret-id "${arn}" \
+                --force-delete-without-recovery \
+                --no-cli-pager
+            done
+            echo "App secrets deleted."
+          fi
+
+      # ── Step 5: terraform destroy ─────────────────────────────────────────────
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.10"
+
+      - name: Terraform init
+        run: terraform -chdir=infra/envs/staging init -input=false
+
+      - name: Terraform destroy
+        run: |
+          echo "Running terraform destroy for staging..."
+          terraform -chdir=infra/envs/staging destroy -auto-approve -input=false
+          echo "Staging environment destroyed."
