@@ -64,3 +64,17 @@ variable "db_username" {
   type        = string
   default     = "platform_app"
 }
+
+# ── Lifecycle / safety ────────────────────────────────────────────────────────
+
+variable "deletion_protection" {
+  description = "Prevent accidental deletion of the RDS instance. Set false for dev (fast teardown), true for staging/prod (requires a second apply to remove before destroy)."
+  type        = bool
+  default     = false
+}
+
+variable "skip_final_snapshot" {
+  description = "Skip the final DB snapshot on destroy. Set true for dev (clean teardown), false for staging/prod (retain last backup before any destroy)."
+  type        = bool
+  default     = true
+}

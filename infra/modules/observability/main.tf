@@ -278,7 +278,7 @@ resource "aws_cloudwatch_metric_alarm" "secret_provisioning_failures" {
 # replace with the percent-encoded equivalent (%2F) for the console deep-link.
 
 resource "aws_cloudwatch_dashboard" "main" {
-  dashboard_name = "CVSPlatformDev"
+  dashboard_name = "CVSPlatform${title(var.environment)}"
 
   dashboard_body = templatefile("${path.module}/dashboard.json.tftpl", {
     environment             = var.environment

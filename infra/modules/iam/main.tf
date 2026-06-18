@@ -15,6 +15,10 @@ locals {
     ManagedBy   = "terraform"
   }
 
+  # Empty string is the sentinel for "use project_name" — Terraform variable
+  # defaults cannot reference other variables, so we resolve here.
+  ecr_repo_name = var.ecr_repository_name != "" ? var.ecr_repository_name : var.project_name
+
   # Full OIDC subject claim patterns this role's trust policy accepts.
   # Ref-based: "repo:hitech42/platform-aws:ref:refs/heads/develop" — used by
   #   jobs that do NOT declare a GitHub environment.
@@ -400,8 +404,9 @@ resource "aws_iam_role_policy" "github_deploy" {
           "ecr:ListImages",
           "ecr:BatchDeleteImage",
         ]
-        # Scoped to the single project repository; name matches var.project_name.
-        Resource = "arn:aws:ecr:*:*:repository/${var.project_name}"
+        # Scoped to exactly this environment's ECR repository (least-privilege).
+        # Dev: "cvs-platform", staging: "cvs-platform-staging" (via ecr_repository_name).
+        Resource = "arn:aws:ecr:*:*:repository/${local.ecr_repo_name}"
       },
 
       # ── 9. ECS — cluster, service, task definition lifecycle ─────────────

@@ -73,6 +73,12 @@ variable "db_name" {
 
 # ── Application ───────────────────────────────────────────────────────────────
 
+variable "ecr_repository_name" {
+  description = "Name of the ECR repository to create. Defaults to var.project_name ('cvs-platform') for dev. Staging passes 'cvs-platform-staging' so each environment has its own isolated image repository."
+  type        = string
+  default     = ""
+}
+
 variable "container_image" {
   description = <<-EOT
     Full ECR image URI for the application container, e.g.

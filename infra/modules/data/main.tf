@@ -71,11 +71,8 @@ resource "aws_db_instance" "postgres" {
   # Set multi_az=true in staging/prod for failover.
   multi_az = false
 
-  # Dev: clean destroy without a final snapshot.  In production, flip both:
-  #   deletion_protection = true   — requires a second apply to remove before destroy
-  #   skip_final_snapshot = false  — ensures a last backup before any destroy
-  deletion_protection = false
-  skip_final_snapshot = true
+  deletion_protection = var.deletion_protection
+  skip_final_snapshot = var.skip_final_snapshot
 
   tags = merge(local.tags, { Name = "${local.prefix}-postgres" })
 }

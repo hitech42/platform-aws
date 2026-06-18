@@ -96,3 +96,18 @@ variable "state_bucket_name" {
   type        = string
 }
 
+# ── ECR ───────────────────────────────────────────────────────────────────────
+
+variable "ecr_repository_name" {
+  description = <<-EOT
+    Name of the ECR repository this environment's GitHub Actions deploy role
+    is allowed to manage and push to.  Defaults to var.project_name ("cvs-platform")
+    which matches the dev repository.  Staging passes "cvs-platform-staging" so
+    each environment's deploy role is scoped to exactly its own ECR repository
+    (least-privilege: the staging role cannot push to the dev repo and vice versa).
+  EOT
+  type        = string
+  default     = ""
+}
+
+
