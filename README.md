@@ -23,8 +23,7 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 | Docker Compose | v2 | Bundled with Docker Desktop |
 
 ## Roadmap / Work in Progress (targeted to be ready by the technical interview date)
-- Staging environment (E5)
-- Bedrock enhancement 
+- Bedrock enhancement
 
 ## Setup
 
@@ -160,6 +159,56 @@ pytest tests/unit -v
 pytest tests/integration -v   # uses testcontainers; requires Docker
 ```
 
+## GitHub Actions Environments
+
+Three deployment workflows ship with the repo:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `app-build-push.yml` | Push to `develop` or `staging` | Builds the Docker image, tags it with the commit SHA, pushes to ECR |
+| `app-deploy.yml` | After a successful build-push, or manual dispatch | Runs Alembic migrations, registers a new ECS task definition revision, rolls the service, smoke-tests `/healthz` and `/readyz` |
+| `terraform-destroy-staging.yml` | Manual only | Staged teardown of the staging environment (see Tearing Down above) |
+
+Both build and deploy workflows resolve the target environment from the triggering branch:
+
+| Branch | GitHub environment | ECR repository | ECS cluster / service |
+|---|---|---|---|
+| `develop` | `dev` | `cvs-platform` | `cvs-platform-dev` |
+| `staging` | `staging` | `cvs-platform-staging` | `cvs-platform-staging` |
+
+### One-time setup after `terraform apply`
+
+GitHub Actions environments hold the per-environment configuration the workflows need. Create them under **Settings → Environments** in the GitHub repository.
+
+#### `dev` environment
+
+| Kind | Name | Value |
+|---|---|---|
+| Variable | `AWS_DEPLOY_ROLE_ARN` | `terraform -chdir=infra/envs/dev output -raw github_actions_role_arn` |
+
+#### `staging` environment
+
+| Kind | Name | Value |
+|---|---|---|
+| Variable | `AWS_DEPLOY_ROLE_ARN` | `terraform -chdir=infra/envs/staging output -raw github_actions_role_arn` |
+
+No secrets are required — authentication is handled entirely via OIDC (`sts:AssumeRoleWithWebIdentity`). The role ARN is a **Variable** (not a Secret) because it is not sensitive.
+
+> **Tip**: Get both ARNs in one step after applying both environments:
+> ```bash
+> echo "dev:     $(terraform -chdir=infra/envs/dev     output -raw github_actions_role_arn)"
+> echo "staging: $(terraform -chdir=infra/envs/staging output -raw github_actions_role_arn)"
+> ```
+
+#### Recommended staging protection rules
+
+In **Settings → Environments → staging**, consider enabling:
+
+- **Required reviewers** — require at least one team member to approve before the deploy job runs. This gives a manual gate between the build and the actual staging deploy.
+- **Deployment branches** — restrict to the `staging` branch only (matches the IAM trust policy).
+
+These are optional but recommended for a production-grade workflow.
+
 ## IntelliJ / PyCharm
 
 Mark `app/src/` as a **Sources Root** (right-click → Mark Directory as → Sources Root). Set the project root as a content root so `app.src.*` imports resolve correctly without needing to set `PYTHONPATH` manually.
@@ -292,15 +341,25 @@ The `SubscriptionArn` field should show the full ARN (not `PendingConfirmation`)
 ### Running Terraform tests (no AWS credentials needed)
 
 ```bash
-cd infra/modules/network      && terraform init -backend=false && terraform test
-cd infra/modules/iam          && terraform init -backend=false && terraform test
-cd infra/modules/kms          && terraform init -backend=false && terraform test
-cd infra/modules/data         && terraform init -backend=false && terraform test
-cd infra/modules/observability && terraform init -backend=false && terraform test
-cd infra/envs/dev             && terraform init -backend=false && terraform test
+for d in infra/modules/network infra/modules/iam infra/modules/kms \
+          infra/modules/data infra/modules/observability \
+          infra/envs/dev infra/envs/staging; do
+  terraform -chdir="$d" init -backend=false -input=false
+  terraform -chdir="$d" test
+done
 ```
 
-All 32 tests use `mock_provider "aws" {}` — no real AWS credentials required.
+All 36 tests use `mock_provider "aws" {}` — no real AWS credentials required.
+
+| Suite | Tests | What is verified |
+|---|---|---|
+| `modules/network` | 4 | Subnet topology, AZ distribution |
+| `modules/iam` | 9 | Trust policy, PassRole condition, wildcard guards |
+| `modules/kms` | 3 | Key policy principals |
+| `modules/data` | 6 | Encryption, IAM auth, destroy flags |
+| `modules/observability` | 4 | Alarm thresholds, separate SNS topics |
+| `envs/dev` | 6 | Module wiring, IAM policy scoping |
+| `envs/staging` | 4 | Staging-specific safety flags (deletion_protection, log retention, branch isolation) |
 
 ### Observability
 
@@ -327,7 +386,21 @@ Open via the `dashboard_url` Terraform output or navigate to CloudWatch → Dash
 
 ### Tearing Down Infrastructure
 
-**Order matters** — destroy envs/dev before bootstrap, and delete secrets manually before the KMS key is destroyed (Secrets Manager holds a reference to the CMK).
+#### Staging
+
+Use the **Infra - Destroy Staging** GitHub Actions workflow (`terraform-destroy-staging.yml`). It handles the required teardown order automatically:
+
+1. Scales ECS to 0 (drains in-flight requests)
+2. Disables RDS deletion protection (`deletion_protection = true` blocks destroy otherwise)
+3. Empties the ECR repository (required before Terraform can delete it)
+4. Optionally deletes app-created Secrets Manager secrets (`platform/**/staging/**`)
+5. Runs `terraform destroy`
+
+Trigger it from **Actions → Infra - Destroy Staging → Run workflow**, type `destroy-staging` to confirm, and tick the secrets checkbox if you want app secrets cleaned up.
+
+#### Dev
+
+**Order matters** — destroy envs/dev before bootstrap, and delete app secrets before the KMS key is destroyed (Secrets Manager holds a reference to the CMK).
 
 ```bash
 # 1. Delete any secrets created by the app (they hold a reference to the KMS key)
@@ -342,7 +415,7 @@ terraform -chdir=infra/envs/dev destroy
 terraform -chdir=infra/bootstrap destroy -var="project_name=cvs-platform"
 ```
 
-> The RDS instance has `deletion_protection = false` and `skip_final_snapshot = true` in dev — it will be deleted immediately without a snapshot. Change these in staging/prod.
+> The dev RDS instance has `deletion_protection = false` and `skip_final_snapshot = true` — it is deleted immediately without a snapshot.
 
 ---
 
