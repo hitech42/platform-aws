@@ -1,12 +1,17 @@
 name: App - Deploy to ECS
 
-# Triggered automatically after a successful build-push run on develop, or
-# manually with an explicit ECR image URI for out-of-band deploys and rollbacks.
+# Triggered automatically after a successful build-push run on develop or
+# staging, or manually with an explicit ECR image URI for out-of-band deploys
+# and rollbacks.
+#
+# Branch → environment mapping:
+#   develop  →  GitHub env "dev",     cluster/service/task "cvs-platform-dev",     ECR "cvs-platform"
+#   staging  →  GitHub env "staging", cluster/service/task "cvs-platform-staging", ECR "cvs-platform-staging"
 on:
   workflow_run:
     workflows: ["App - Build & Push"]
     types: [completed]
-    branches: [develop]
+    branches: [develop, staging]
   workflow_dispatch:
     inputs:
       image_uri:
@@ -15,10 +20,6 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: cvs-platform
-  ECS_CLUSTER: cvs-platform-dev
-  ECS_SERVICE: cvs-platform-dev
-  TASK_FAMILY: cvs-platform-dev
   CONTAINER_NAME: cvs-platform
 
 jobs:
@@ -26,15 +27,42 @@ jobs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    environment: dev # AWS_DEPLOY_ROLE_ARN is an environment-scoped variable, not a repo-level one
+    # For workflow_run: head_branch is the branch that triggered the build.
+    # For workflow_dispatch: ref_name is the branch selected by the operator.
+    # The expression below resolves to 'staging' or 'dev' in both cases.
+    environment: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'staging' && 'staging' || 'dev' }}
     permissions:
       id-token: write
       contents: read
 
     steps:
+      # ── Resolve deployment target ────────────────────────────────────────────
+      # Determines the branch-specific resource names once and exports them to
+      # $GITHUB_ENV so all subsequent steps reference simple variables.
+      - name: Resolve deployment target
+        run: |
+          # workflow_run: head_branch of the triggering build workflow
+          # workflow_dispatch: the ref selected by the operator
+          BRANCH="${{ github.event.workflow_run.head_branch || github.ref_name }}"
+
+          if [[ "${BRANCH}" == "staging" ]]; then
+            echo "ECR_REPOSITORY=cvs-platform-staging"  >> "$GITHUB_ENV"
+            echo "ECS_CLUSTER=cvs-platform-staging"     >> "$GITHUB_ENV"
+            echo "ECS_SERVICE=cvs-platform-staging"     >> "$GITHUB_ENV"
+            echo "TASK_FAMILY=cvs-platform-staging"     >> "$GITHUB_ENV"
+          else
+            echo "ECR_REPOSITORY=cvs-platform"          >> "$GITHUB_ENV"
+            echo "ECS_CLUSTER=cvs-platform-dev"         >> "$GITHUB_ENV"
+            echo "ECS_SERVICE=cvs-platform-dev"         >> "$GITHUB_ENV"
+            echo "TASK_FAMILY=cvs-platform-dev"         >> "$GITHUB_ENV"
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          # AWS_DEPLOY_ROLE_ARN is set as a variable on each GitHub Actions
+          # environment (Settings > Environments > dev/staging > Variables).
+          # Value: the github_actions_role_arn output from terraform apply.
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 

@@ -1,11 +1,15 @@
 name: App - Build & Push
 
-# Triggered on every push to develop that touches application code, and manually
-# for ad-hoc image builds.  Produces a commit-SHA-tagged ECR image consumed by
-# the deploy workflow.
+# Triggered on every push to develop or staging that touches application code,
+# and manually for ad-hoc image builds.  Produces a commit-SHA-tagged ECR image
+# consumed by the deploy workflow.
+#
+# Branch → environment mapping:
+#   develop  →  GitHub env "dev",     ECR repo "cvs-platform"
+#   staging  →  GitHub env "staging", ECR repo "cvs-platform-staging"
 on:
   push:
-    branches: [develop]
+    branches: [develop, staging]
     paths:
       - "app/**"
       - ".github/workflows/app-build-push.yml"
@@ -13,16 +17,21 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: cvs-platform
 
 jobs:
   build-and-push:
     name: Build & push to ECR
     runs-on: ubuntu-latest
-    environment: dev # AWS_DEPLOY_ROLE_ARN is an environment-scoped variable, not a repo-level one
+    # environment drives which AWS_DEPLOY_ROLE_ARN variable is read.
+    # GitHub Actions supports expressions here — evaluates before the job runs.
+    environment: ${{ github.ref_name == 'staging' && 'staging' || 'dev' }}
     permissions:
       id-token: write  # required for OIDC token exchange
       contents: read
+    env:
+      # Derived from the triggering branch so the same workflow file serves both
+      # environments without duplication.
+      ECR_REPOSITORY: ${{ github.ref_name == 'staging' && 'cvs-platform-staging' || 'cvs-platform' }}
 
     outputs:
       image_uri: ${{ steps.push.outputs.image_uri }}
@@ -33,11 +42,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Set AWS_DEPLOY_ROLE_ARN as a variable on the "dev" GitHub Actions
-          # environment (Settings > Environments > dev > Variables) after the
-          # first `terraform apply`.  Value: module.iam.github_actions_role_arn
-          # Must be environment-scoped, not repo-level — this job declares
-          # environment: dev above so it can read it.
+          # AWS_DEPLOY_ROLE_ARN is set as a variable on each GitHub Actions
+          # environment (Settings > Environments > dev/staging > Variables).
+          # Value: the github_actions_role_arn output from terraform apply.
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 

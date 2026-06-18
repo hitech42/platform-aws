@@ -1,9 +1,5 @@
 # Staging environment — deployed from the `staging` branch. Promotes from `develop`.
 # Do not edit resource names manually — they are derived from the environment variable.
-# Scale ECS up/down without Terraform:
-#   aws ecs update-service --cluster cvs-platform-staging \
-#     --service cvs-platform-staging --desired-count 1   # scale up
-#     --desired-count 0                                   # pause (cost saving)
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
@@ -89,14 +85,6 @@ module "data" {
 
 # ── ECS service ───────────────────────────────────────────────────────────────
 #
-# desired_count=0: staging starts paused to minimise cost.
-# Scale up before testing:
-#   aws ecs update-service --cluster cvs-platform-staging \
-#     --service cvs-platform-staging --desired-count 1 --profile cvs-platform
-# Scale back down after:
-#   aws ecs update-service --cluster cvs-platform-staging \
-#     --service cvs-platform-staging --desired-count 0 --profile cvs-platform
-#
 # ecr_repository_name="cvs-platform-staging": each environment has an isolated
 # ECR repo so a staging push cannot accidentally overwrite a dev image.
 
@@ -121,9 +109,8 @@ module "ecs_service" {
   db_name     = var.db_name
 
   ecr_repository_name = "${var.project_name}-${var.environment}" # "cvs-platform-staging"
-  desired_count       = 0                                        # paused by default; scale up manually
   log_retention_days  = 14                                       # longer than dev's 7 days
-  # task_cpu (256), task_memory (512), app_port (8000), ecr_image_count_limit (10) use module defaults
+  # desired_count (1), task_cpu (256), task_memory (512), app_port (8000), ecr_image_count_limit (10) use module defaults
 }
 
 # ── ECS task execution role runtime policy ────────────────────────────────────
