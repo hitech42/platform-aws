@@ -106,8 +106,7 @@ module "ecs_service" {
   db_endpoint = module.data.db_endpoint
   db_username = var.db_username
   db_name     = var.db_name
-  task_memory = 1024
-  # task_cpu, desired_count, app_port,
+  # task_cpu, task_memory, desired_count, app_port,
   # log_retention_days, ecr_image_count_limit use module defaults
 }
 
