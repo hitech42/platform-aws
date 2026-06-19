@@ -5,7 +5,7 @@
 ## ADR-001: Local Development Strategy — Native Postgres + LocalStack + Native App Process
 
 **Date**: 2026-06-13
-**Status**: Accepted
+**Status**: Superseded by [ADR-016](#adr-016-local-development-strategy--containerised-postgres--localstack--native-app-process)
 
 ### Context
 
@@ -482,3 +482,35 @@ Use **`extended_statistic = "p95"`** on the `alb_latency_p95` alarm with `thresh
 
 - **p95 is noisier than average**: a single slow batch of requests can push p95 above threshold without a genuine latency problem. Mitigated by requiring 2 consecutive evaluation periods (`evaluation_periods = 2`) before the alarm fires.
 - **`treat_missing_data = "notBreaching"`**: when there is no traffic (no data points), the alarm stays OK rather than entering INSUFFICIENT_DATA and paging on-call. This is correct for an internal tool with intermittent traffic but means a complete traffic blackout would not trigger the alarm — the `alb_healthy_hosts` alarm covers that case.
+
+---
+
+## ADR-016: Local Development Strategy — Containerised Postgres + LocalStack + Native App Process
+
+**Date**: 2026-06-19
+**Status**: Accepted
+**Supersedes**: [ADR-001](#adr-001-local-development-strategy--native-postgres--localstack--native-app-process)
+
+### Context
+
+ADR-001 chose native Postgres (running on the developer's machine) primarily to support IntelliJ IDEA debugger attachment with zero friction. The original concern was that attaching to an in-container process required extra Docker network configuration.
+
+The project is now being reviewed by interviewers. A native Postgres installation is an environment-specific prerequisite that adds setup friction for anyone cloning the repository for the first time — they must install Postgres, create a role, and create a database before running the application. Docker is already required (for LocalStack), so shipping Postgres as a second Docker Compose service adds no new tooling requirement.
+
+### Decision
+
+Run **Postgres inside Docker Compose** alongside LocalStack. The `docker-compose.yml` now defines both `localstack` and `postgres` services; `docker compose up -d` starts both. The `postgres_data` named volume persists data across container restarts.
+
+Credentials are unchanged from the original default (`POSTGRES_USER=app`, `POSTGRES_PASSWORD=localdev`, `POSTGRES_DB=platform`), so the `DATABASE_URL` in `.env.example` (`postgresql://app:localdev@localhost:5432/platform`) requires no modification — Docker maps the container's port 5432 to `localhost:5432`.
+
+### Rationale
+
+- **Zero-install onboarding**: a new reviewer (or developer) needs only Docker Desktop. `git clone` → `docker compose up -d` → `alembic upgrade head` → `uvicorn` is the complete flow with no OS-level package installation.
+- **Version pinned**: `postgres:16-alpine` is locked in `docker-compose.yml`, matching the CI and production target version exactly. Native installs may be on any version.
+- **IntelliJ debugging unaffected**: the FastAPI app process still runs natively (not in a container). Only Postgres moved into Docker. The debugger attaches to the native `uvicorn` process exactly as before; network access to `localhost:5432` is identical whether Postgres is native or container-mapped.
+- **Consistent with LocalStack**: the two AWS-and-DB dependencies now follow the same pattern. There is no longer a split model where one external dependency is containerised and one is not.
+
+### Trade-offs
+
+- **Docker must be running to start the app**: previously, a developer could work without Docker if they only needed the API (no AWS calls). Now, Postgres also requires Docker. Acceptable — the app cannot function without a database anyway, and Docker is already listed as a prerequisite.
+- **Data volume lifecycle**: `postgres_data` persists across restarts. Destroying the volume (`docker compose down -v`) clears all local data and requires re-running migrations. This is the same behaviour as the native installation, where `dropdb platform` would do the same.

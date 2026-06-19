@@ -17,31 +17,22 @@ services:
       timeout: 5s
       retries: 5
 
-  # Postgres is intentionally run natively (not in Docker) for local dev — this
-  # enables IntelliJ IDEA debugger to attach to the app process without network
-  # complications. See DECISIONS.md for the full rationale.
-  #
-  # Uncomment (or run with `--profile postgres`) if you need a fully containerised
-  # setup, e.g. on a fresh machine or in CI without a native Postgres install.
-  #
-  # postgres:
-  #   image: postgres:16-alpine
-  #   profiles:
-  #     - postgres
-  #   ports:
-  #     - "5432:5432"
-  #   environment:
-  #     POSTGRES_USER: app
-  #     POSTGRES_PASSWORD: localdev
-  #     POSTGRES_DB: platform
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U app -d platform"]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 10
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: platform
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   localstack_data:
-  # postgres_data:
+  postgres_data:
