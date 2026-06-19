@@ -18,8 +18,7 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 | Tool | Version | Notes |
 |---|---|---|
 | Python | 3.12+ | Tested with 3.12 |
-| PostgreSQL | 14+ | Running natively on `localhost:5432` |
-| Docker | 24+ | For LocalStack only |
+| Docker | 24+ | For LocalStack and Postgres (both containerised) |
 | Docker Compose | v2 | Bundled with Docker Desktop |
 
 ## Roadmap / Work in Progress (targeted to be ready by the technical interview date)
@@ -46,25 +45,18 @@ pip install "app/[dev]"
 
 ```bash
 cp .env.example .env
-# Edit .env if your local Postgres credentials differ from the defaults.
+# Default credentials in .env.example match the Docker Compose services — no edits needed for local dev.
 ```
 
-### 4. Create the local database
+### 4. Start services (Postgres + LocalStack)
 
 ```bash
-psql -U postgres -c "CREATE USER app WITH PASSWORD 'localdev';"
-psql -U postgres -c "CREATE DATABASE platform OWNER app;"
-```
-
-### 5. Start LocalStack (for AWS Secrets Manager emulation)
-
-```bash
-docker compose up -d localstack
-# Wait for LocalStack to report healthy:
+docker compose up -d
+# Wait for both services to report healthy:
 docker compose ps
 ```
 
-### 6. Run database migrations
+### 5. Run database migrations
 
 ```bash
 cd app/
@@ -77,7 +69,7 @@ To roll back all migrations:
 cd app/ && alembic downgrade base && cd ..
 ```
 
-### 7. Run the application
+### 6. Run the application
 
 ```bash
 uvicorn app.src.main:app --reload
@@ -88,7 +80,7 @@ The API is available at `http://localhost:8000`.
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
-### 8. Verify health endpoints
+### 7. Verify health endpoints
 
 ```bash
 curl -s http://localhost:8000/healthz | python3 -m json.tool
