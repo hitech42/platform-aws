@@ -6,7 +6,7 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 
 **Core API implemented.** The full secret-request lifecycle is operational:
 
-- Service catalog (register/list/get teams and services)
+- Service catalog (register, list, and look up services)
 - Secret-request lifecycle (`PENDING → APPROVED → PROVISIONING → PROVISIONED | FAILED`)
 - Immutable audit trail (one event row per state transition)
 - AWS Secrets Manager provisioning via `approve` endpoint
