@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1422" dy="762" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ══════════════════ COLUMN HEADERS ══════════════════ -->
+
+    <!-- GitHub Actions (IdP) header -->
+    <mxCell id="gh-header" value="&lt;b&gt;GitHub Actions&lt;/b&gt;&lt;br&gt;&lt;font style=&apos;font-size:11px&apos;&gt;Identity Provider (IdP)&lt;/font&gt;"
+      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5f5e3;strokeColor=#1D9E75;fontColor=#0F6E56;arcSize=10;verticalAlign=middle;align=center;fontSize=13;"
+      vertex="1" parent="1">
+      <mxGeometry x="30" y="30" width="160" height="56" as="geometry" />
+    </mxCell>
+
+    <!-- GitHub OIDC header -->
+    <mxCell id="oidc-header" value="&lt;b&gt;GitHub OIDC&lt;/b&gt;&lt;br&gt;&lt;font style=&apos;font-size:11px&apos;&gt;Token issuer&lt;/font&gt;"
+      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e0f8;strokeColor=#534AB7;fontColor=#3C3489;arcSize=10;verticalAlign=middle;align=center;fontSize=13;"
+      vertex="1" parent="1">
+      <mxGeometry x="370" y="30" width="160" height="56" as="geometry" />
+    </mxCell>
+
+    <!-- AWS STS header -->
+    <mxCell id="aws-header" value="&lt;b&gt;AWS STS&lt;/b&gt;&lt;br&gt;&lt;font style=&apos;font-size:11px&apos;&gt;Relying Party (RP)&lt;/font&gt;"
+      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef3d9;strokeColor=#BA7517;fontColor=#854F0B;arcSize=10;verticalAlign=middle;align=center;fontSize=13;"
+      vertex="1" parent="1">
+      <mxGeometry x="710" y="30" width="160" height="56" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ LIFELINES ══════════════════ -->
+
+    <!-- GitHub Actions lifeline -->
+    <mxCell id="ll-gh" value=""
+      style="endArrow=none;dashed=1;dashPattern=4 4;strokeColor=#AAAAAA;strokeWidth=1;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="110" y="86" as="sourcePoint" />
+        <mxPoint x="110" y="560" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- GitHub OIDC lifeline -->
+    <mxCell id="ll-oidc" value=""
+      style="endArrow=none;dashed=1;dashPattern=4 4;strokeColor=#AAAAAA;strokeWidth=1;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="450" y="86" as="sourcePoint" />
+        <mxPoint x="450" y="560" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- AWS STS lifeline -->
+    <mxCell id="ll-aws" value=""
+      style="endArrow=none;dashed=1;dashPattern=4 4;strokeColor=#AAAAAA;strokeWidth=1;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="790" y="86" as="sourcePoint" />
+        <mxPoint x="790" y="560" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ══════════════════ STEP LABELS ══════════════════ -->
+
+    <mxCell id="lbl-1" value="1" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#AAAAAA;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="10" y="135" width="20" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-2" value="2" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#AAAAAA;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="10" y="195" width="20" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-3" value="3" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#AAAAAA;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="10" y="275" width="20" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-4" value="4" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#AAAAAA;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="10" y="360" width="20" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-5" value="5" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#AAAAAA;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="10" y="435" width="20" height="20" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-6" value="6" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#AAAAAA;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="10" y="505" width="20" height="20" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 1: Request OIDC token ══════════════════ -->
+
+    <mxCell id="step1-arrow" value=""
+      style="endArrow=block;endFill=1;strokeColor=#555555;strokeWidth=1.5;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="110" y="145" as="sourcePoint" />
+        <mxPoint x="442" y="145" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="step1-label" value="Request OIDC token"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;"
+      vertex="1" parent="1">
+      <mxGeometry x="175" y="124" width="200" height="18" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 2: Signed JWT issued ══════════════════ -->
+
+    <mxCell id="step2-arrow" value=""
+      style="endArrow=block;endFill=1;strokeColor=#1D9E75;strokeWidth=2;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="450" y="200" as="sourcePoint" />
+        <mxPoint x="118" y="200" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="step2-label-top" value="Signed JWT (ID Token)"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#1D9E75;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="175" y="180" width="200" height="16" as="geometry" />
+    </mxCell>
+    <mxCell id="step2-label-bot" value="iss, sub, aud claims"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;"
+      vertex="1" parent="1">
+      <mxGeometry x="175" y="204" width="200" height="16" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 3: AssumeRoleWithWebIdentity ══════════════════ -->
+
+    <mxCell id="step3-arrow" value=""
+      style="endArrow=block;endFill=1;strokeColor=#555555;strokeWidth=1.5;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="110" y="285" as="sourcePoint" />
+        <mxPoint x="782" y="285" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="step3-label-top" value="AssumeRoleWithWebIdentity"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="195" y="262" width="510" height="16" as="geometry" />
+    </mxCell>
+    <mxCell id="step3-label-bot" value="(sends JWT + IAM Role ARN)"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;"
+      vertex="1" parent="1">
+      <mxGeometry x="195" y="288" width="510" height="16" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 4a: Fetch public keys ══════════════════ -->
+
+    <mxCell id="step4a-arrow" value=""
+      style="endArrow=block;endFill=1;strokeColor=#555555;strokeWidth=1.5;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="790" y="360" as="sourcePoint" />
+        <mxPoint x="458" y="360" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="step4a-label-top" value="Fetch public keys"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="460" y="338" width="230" height="16" as="geometry" />
+    </mxCell>
+    <mxCell id="step4a-label-bot" value="(JWKS endpoint)"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;"
+      vertex="1" parent="1">
+      <mxGeometry x="460" y="362" width="230" height="16" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 4b: Public keys returned (dashed) ══════════════════ -->
+
+    <mxCell id="step4b-arrow" value=""
+      style="endArrow=block;endFill=1;strokeColor=#555555;strokeWidth=1.5;dashed=1;dashPattern=5 3;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="450" y="398" as="sourcePoint" />
+        <mxPoint x="782" y="398" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="step4b-label" value="Public keys returned"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;"
+      vertex="1" parent="1">
+      <mxGeometry x="460" y="378" width="230" height="16" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 5: Verify (AWS internal box) ══════════════════ -->
+
+    <mxCell id="step5-box" value="&lt;b&gt;Verify signature&lt;/b&gt;&lt;br&gt;&lt;font style=&apos;font-size:11px&apos;&gt;+ check trust policy&lt;/font&gt;"
+      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef3d9;strokeColor=#BA7517;fontColor=#854F0B;arcSize=10;verticalAlign=middle;align=center;fontSize=12;"
+      vertex="1" parent="1">
+      <mxGeometry x="680" y="422" width="220" height="44" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ STEP 6: Temporary credentials ══════════════════ -->
+
+    <mxCell id="step6-arrow" value=""
+      style="endArrow=block;endFill=1;strokeColor=#1D9E75;strokeWidth=2;"
+      edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="790" y="510" as="sourcePoint" />
+        <mxPoint x="118" y="510" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="step6-label-top" value="Temporary AWS credentials"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#1D9E75;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="130" y="488" width="550" height="16" as="geometry" />
+    </mxCell>
+    <mxCell id="step6-label-bot" value="(AccessKeyId, SecretKey, SessionToken)"
+      style="text;html=1;align=center;verticalAlign=middle;resizable=0;strokeColor=none;fillColor=none;fontSize=11;fontColor=#555555;"
+      vertex="1" parent="1">
+      <mxGeometry x="130" y="512" width="550" height="16" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════ BOTTOM NOTE ══════════════════ -->
+
+    <mxCell id="bottom-note" value="AWS never sees your long-lived secrets — trust is established entirely via signed tokens"
+      style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#CCCCCC;fontColor=#555555;arcSize=6;verticalAlign=middle;align=center;fontSize=11;"
+      vertex="1" parent="1">
+      <mxGeometry x="30" y="546" width="870" height="28" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>
