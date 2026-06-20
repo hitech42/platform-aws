@@ -30,7 +30,7 @@ This service lets internal dev teams self-serve platform requests without openin
 │   ├── src/             ← application source; import as app.src.*
 │   │   ├── main.py      ← create_app() factory
 │   │   ├── api/v1/      ← versioned routers; health routes mounted at root
-│   │   ├── core/        ← config (pydantic-settings) + logging (structlog)
+│   │   ├── core/        ← config (pydantic-settings) + logging (structlog) + runtime_config/
 │   │   ├── db/          ← SQLAlchemy engine, session factory, Alembic migrations
 │   │   ├── models/      ← SQLAlchemy ORM models (Base lives here)
 │   │   ├── schemas/     ← Pydantic request/response schemas
@@ -136,16 +136,41 @@ The `approve` route commits twice: once after `PROVISIONING` (before the AWS cal
 - Random values are generated with `secrets.token_urlsafe(32)` — never logged.
 - `create_app_secret` raises `ConflictError` on `ResourceExistsException` and re-raises all other `ClientError`s unchanged.
 
-## Bedrock / Summary Endpoint Conventions
+## Summary Endpoint / LLM Provider Conventions
 
 `GET /api/v1/secret-requests/{id}/summary` returns two independent sections:
 
-- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_checks.py` from Postgres data. Bedrock never determines facts.
-- **`narrative`** — generated text from Bedrock (`bedrock-runtime` `converse` API). May be `null` if Bedrock is unavailable. Its absence must never prevent callers from reading `facts`.
+- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_checks.py` from Postgres data. The LLM never determines facts.
+- **`narrative`** — generated text from the active LLM provider. May be `null` if the provider fails. Its absence must never prevent callers from reading `facts`.
 
 ### Design rule (ADR-017)
 
-**Bedrock only phrases pre-computed facts. It never determines whether a fact is true.** The prompt passed to Bedrock already contains the computed flag values; Bedrock is asked only to render them as readable prose for a human reviewer.
+**The LLM only phrases pre-computed facts. It never determines whether a fact is true.** The prompt already contains the computed flag values; the LLM is asked only to render them as readable prose for a human reviewer.
+
+### LLM provider abstraction (ADR-018)
+
+The active provider is selected at runtime from the `config` table (`key = 'llm_provider'`) with a **30-second TTL in-memory cache** (`app/src/core/runtime_config/llm_provider_config.py`). No redeploy is required to switch:
+
+```sql
+UPDATE config SET value = 'bedrock'       WHERE key = 'llm_provider';
+UPDATE config SET value = 'anthropic_api' WHERE key = 'llm_provider';
+```
+
+Both providers implement `NarrativeProvider` (a `@runtime_checkable Protocol` in `app/src/services/llm_provider.py`):
+
+```python
+class NarrativeProvider(Protocol):
+    def generate_narrative(self, prompt: str) -> str: ...
+```
+
+`get_active_provider(db: Session) -> NarrativeProvider` returns one of two pre-instantiated module-level singletons:
+
+- **`BedrockNarrativeProvider`** — Bedrock Runtime `converse` API. Model: `us.anthropic.claude-haiku-4-5-20251001-v1:0`. Returns a `[stub]` string immediately when `settings.aws_endpoint_url` is set (LocalStack CE has no Bedrock).
+- **`AnthropicAPINarrativeProvider`** — Anthropic Python SDK `messages.create`. Model: `claude-haiku-4-5-20251001`. Uses lazy client init (avoids `AuthenticationError` at startup when no key is configured). API key loaded once at import time via `_load_anthropic_api_key()`: first from `settings.anthropic_api_key` (env var), then from Secrets Manager at `/{environment}/platform/anthropic-api-key` (only when `aws_endpoint_url` is `None`).
+
+Both raise `NarrativeError` (defined in `app/src/core/exceptions.py`) on failure. `NarrativeError` does **not** inherit `AppError` — it carries no HTTP status code and is caught locally by the summary route, which sets `narrative=null` and `narrative_error=<message>` rather than propagating a 500.
+
+`narrative_generated_by` is a `Literal["bedrock", "stub", "anthropic_api"]` (or `null` on error). The summary route determines it by `isinstance(provider, BedrockNarrativeProvider)` + `settings.aws_endpoint_url` check — never by interrogating the narrative text itself.
 
 ### `requested_by` extraction
 
@@ -157,18 +182,36 @@ requested_by = next((e.actor for e in events if e.status == "PENDING"), "unknown
 
 `"unknown"` is unconditionally treated as an ownership mismatch by `check_ownership_mismatch`.
 
-### LocalStack stub path
-
-LocalStack CE does not implement Bedrock. When `settings.aws_endpoint_url` is set, `generate_request_narrative` returns a `[stub]` string immediately without making any boto3 call. The `narrative_generated_by` field is `"stub"` in this case; `"bedrock"` on a real AWS call; `null` on error.
-
 ### Bedrock IAM model access
 
 The ECS task role has `bedrock:InvokeModel` scoped to two ARNs:
 
-- `arn:aws:bedrock:{region}::inference-profile/us.anthropic.claude-haiku-4-5-20251001:0`
-- `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001:0`
+- `arn:aws:bedrock:{region}::inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0`
+- `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`
 
 The region wildcard on the foundation model ARN is required because cross-region inference profiles route dynamically to any US region. The model must also be enabled in the Bedrock console → Model access before first use in the AWS account.
+
+### Anthropic API key (AWS)
+
+The Anthropic API key is stored as a Secrets Manager secret at `/{environment}/platform/anthropic-api-key`, encrypted with the platform CMK. The secret shell is provisioned by Terraform (`aws_secretsmanager_secret.anthropic_api_key` in `infra/envs/dev/main.tf`); the actual key value must be set out-of-band after apply:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id /dev/platform/anthropic-api-key \
+  --secret-string "sk-ant-..."
+```
+
+In local dev, set `ANTHROPIC_API_KEY` in `.env` instead — the Secrets Manager fetch is skipped when `aws_endpoint_url` is set.
+
+## Runtime Config Package
+
+`app/src/core/runtime_config/` is a package for DB-backed configuration values that benefit from short-lived in-memory caching to avoid a DB round-trip on every request. Each module in the package manages one config key:
+
+| Module | Config key | Default | TTL |
+|---|---|---|---|
+| `llm_provider_config.py` | `llm_provider` | `anthropic_api` | 30 s |
+
+Pattern: a class with `_cached_value`, `_cached_at`, and `_ttl` instance attributes. `get(db: Session) -> str` returns the cached value when fresh, otherwise queries `SELECT value FROM config WHERE key = ?`. On DB error, the cached value is used if available; otherwise the module default is returned. Cache is reset via `_reset_cache()` (used in tests via the module-level singleton).
 
 ## AWS / LocalStack Conventions
 
@@ -188,6 +231,7 @@ The region wildcard on the foundation model ARN is required because cross-region
 | `services` | Catalog of registered internal services/teams |
 | `secret_requests` | One row per request to provision a secret; tracks current status |
 | `request_events` | Immutable audit log — one row per status transition |
+| `config` | Key/value runtime configuration (e.g. `llm_provider`); read with 30 s TTL cache |
 
 ### `secret_requests.status` lifecycle
 

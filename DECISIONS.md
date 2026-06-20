@@ -523,6 +523,52 @@ Model: **Claude Haiku 4.5 via Bedrock cross-region inference profile** (`us.anth
 
 ---
 
+## ADR-018: Swappable LLM Provider — DB-backed Runtime Config with 30-second TTL Cache
+
+**Date**: 2026-06-20
+**Status**: Accepted
+**Extends**: [ADR-017](#adr-017-factsnarrative-separation-for-the-ai-summary-endpoint)
+
+### Context
+
+ADR-017 established the facts/narrative separation for the summary endpoint and hardcoded AWS Bedrock (Claude Haiku 4.5 via cross-region inference profile) as the sole narrative provider. Two problems surfaced during development:
+
+1. **Bedrock requires manual model-access enablement**: in a fresh AWS account, the model must be enabled in the Bedrock console before the first invocation. During development, the direct Anthropic API is simpler to configure (one environment variable) and uses the same model family.
+2. **No hot-switch capability**: changing the provider meant modifying code, cutting a release, and deploying a new ECS task revision — a 5–15-minute cycle for what should be an operational configuration decision.
+
+### Decision
+
+Introduce a `config` table in Postgres and a runtime config service (`app/src/core/runtime_config/llm_provider_config.py`) with a **30-second TTL in-memory cache**. The active provider is stored as a row with `key = 'llm_provider'`; valid values are `bedrock` and `anthropic_api`. The seed value is `anthropic_api`.
+
+To switch providers at runtime without a redeploy or restart:
+```sql
+UPDATE config SET value = 'bedrock' WHERE key = 'llm_provider';
+```
+The running ECS task picks up the change within 30 seconds on the next summary request.
+
+Two concrete providers implement the `NarrativeProvider` protocol (`generate_narrative(prompt: str) -> str`):
+
+- **`BedrockNarrativeProvider`**: calls Bedrock Runtime `converse` API; returns a labeled `[stub]` string immediately when `AWS_ENDPOINT_URL` is set (LocalStack CE has no Bedrock).
+- **`AnthropicAPINarrativeProvider`**: calls the Anthropic Messages API via the `anthropic` Python SDK. The API key is loaded once at startup: first from the `ANTHROPIC_API_KEY` env var, then from Secrets Manager at `/{environment}/platform/anthropic-api-key` (real AWS only; skipped when `AWS_ENDPOINT_URL` is set).
+
+`get_active_provider(db)` reads the cached config value and returns the pre-instantiated singleton provider. Both providers are instantiated at module import time; only the selection is per-request.
+
+### Rationale
+
+- **No redeploy to switch providers**: a single `UPDATE` propagates within one TTL window. Useful in development (direct API vs Bedrock) and in production (Bedrock throttling or regional unavailability).
+- **Secrets Manager for the Anthropic key on AWS**: the key is not in the ECS task definition environment (avoids it being visible in the ECS console). The task role has `secretsmanager:GetSecretValue` scoped to the single key ARN (`AnthropicAPIKeyRead` IAM statement; see Stage 5 Terraform).
+- **Lazy client init**: `anthropic.Anthropic()` is created on first `generate_narrative` call, not at import. This prevents `AuthenticationError` at startup when `bedrock` is the active provider and no Anthropic key is configured — a valid production configuration.
+- **ADR-017 design principle preserved**: `facts` are still always computed deterministically from Postgres. Neither provider determines facts; both only phrase pre-computed flags as prose.
+
+### Trade-offs
+
+- **30-second propagation lag**: after an `UPDATE config` statement, the running process continues using the cached provider for up to 30 seconds. Acceptable for a low-traffic internal tool.
+- **Cache is per-process**: each ECS task replica has its own 30-second window. Under a multi-task deployment, different replicas may briefly use different providers after a config change. Provider selection is not a user-visible consistency concern.
+- **Anthropic key loaded once at startup**: `_load_anthropic_api_key()` runs at module import time. If the Secrets Manager value changes, the task must restart to pick up the new key.
+- **`narrative_generated_by` has three values**: `"bedrock"`, `"stub"`, and `"anthropic_api"`. API consumers must not assume only Bedrock values — all three are valid narrative sources, distinct from facts.
+
+---
+
 ## ADR-016: Local Development Strategy — Containerised Postgres + LocalStack + Native App Process
 
 **Date**: 2026-06-19
