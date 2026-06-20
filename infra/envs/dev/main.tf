@@ -242,6 +242,16 @@ resource "aws_iam_role_policy" "ecs_task" {
           "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
         ]
       },
+      {
+        Sid    = "AnthropicAPIKeyRead"
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        # Scoped to the single Anthropic API key secret — read-only for startup
+        # key loading (app/src/services/llm_provider.py:_load_anthropic_api_key).
+        # Kept separate from SecretsManagerAppSecrets: different action set
+        # (read-only vs. full lifecycle) and different resource path.
+        Resource = aws_secretsmanager_secret.anthropic_api_key.arn
+      },
     ]
   })
 }
@@ -266,6 +276,25 @@ module "observability" {
   rds_instance_identifier = module.data.db_instance_identifier
 
   log_group_name = module.ecs_service.log_group_name
+}
+
+# ── Anthropic API key credential ─────────────────────────────────────────────
+#
+# Creates the secret shell only — the actual API key value must be set
+# out-of-band after apply:
+#   aws secretsmanager put-secret-value \
+#     --secret-id /dev/platform/anthropic-api-key \
+#     --secret-string "sk-ant-..."
+#
+# The app reads this secret at startup via _load_anthropic_api_key() in
+# app/src/services/llm_provider.py, only when aws_endpoint_url is unset
+# (real AWS).  Local dev uses the ANTHROPIC_API_KEY env var instead.
+
+resource "aws_secretsmanager_secret" "anthropic_api_key" {
+  name        = "/${var.environment}/platform/anthropic-api-key"
+  description = "Anthropic API key for the ${local.prefix} LLM narrative provider"
+  kms_key_id  = module.kms.kms_key_arn
+  tags        = local.tags
 }
 
 # ── Billing alarm ─────────────────────────────────────────────────────────────

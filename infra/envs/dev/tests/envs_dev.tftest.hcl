@@ -156,6 +156,13 @@ run "valid_environment_accepted" {
     }
   }
 
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
+    }
+  }
+
   assert {
     condition     = module.iam.github_actions_role_arn != ""
     error_message = "GitHub Actions role ARN must be non-empty when environment is valid."
@@ -246,6 +253,13 @@ run "ecs_task_policy_rds_scoped" {
     target = aws_sns_topic.billing_alarm
     values = {
       arn = "arn:aws:sns:us-east-1:123456789012:test-dev-billing-alarm"
+    }
+  }
+
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
     }
   }
 
@@ -368,6 +382,13 @@ run "ecs_task_policy_secrets_scoped" {
     }
   }
 
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
+    }
+  }
+
   # GetSecretValue on Resource="*" would expose every secret in the account.
   assert {
     condition = !anytrue([
@@ -487,6 +508,13 @@ run "ecs_task_policy_bedrock_scoped" {
     }
   }
 
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
+    }
+  }
+
   # bedrock:InvokeModel on Resource="*" would allow invoking any model.
   assert {
     condition = !anytrue([
@@ -593,6 +621,13 @@ run "ecs_task_execution_policy_scoped" {
     target = aws_sns_topic.billing_alarm
     values = {
       arn = "arn:aws:sns:us-east-1:123456789012:test-dev-billing-alarm"
+    }
+  }
+
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
     }
   }
 
@@ -754,8 +789,132 @@ run "sns_topics_are_separate" {
     }
   }
 
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
+    }
+  }
+
   assert {
     condition     = module.observability.alerts_topic_arn != aws_sns_topic.billing_alarm.arn
     error_message = "Operational alerts topic ARN must differ from the billing alarm topic ARN. These are separate SNS topics with different subscribers and urgency levels."
+  }
+}
+
+# ── ECS task policy: Anthropic API key read must be scoped to the one secret ──
+#
+# The ECS task must be able to fetch the Anthropic API key at startup when the
+# anthropic_api provider is active.  The grant must be read-only (GetSecretValue
+# only) and scoped to the single /dev/platform/anthropic-api-key secret ARN —
+# never a wildcard that would expose other secrets in the account.
+
+run "ecs_task_policy_anthropic_key_scoped" {
+  command = apply
+
+  override_data {
+    target = module.network.data.aws_availability_zones.available
+    values = {
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
+    }
+  }
+
+  override_data {
+    target = data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+      user_id    = "AIDAXXXXXXXXXXXXXXXXX"
+    }
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = {
+      name        = "us-east-1"
+      description = "US East (N. Virginia)"
+    }
+  }
+
+  override_module {
+    target = module.kms
+    outputs = {
+      kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000001"
+      kms_key_id    = "00000000-0000-0000-0000-000000000001"
+      kms_alias_arn = "arn:aws:kms:us-east-1:123456789012:alias/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.data
+    outputs = {
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+    }
+  }
+
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.observability
+    outputs = {
+      alerts_topic_arn = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      dashboard_name   = "CVSPlatformDev"
+    }
+  }
+
+  override_resource {
+    target = aws_sns_topic.billing_alarm
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:test-dev-billing-alarm"
+    }
+  }
+
+  override_resource {
+    target = aws_secretsmanager_secret.anthropic_api_key
+    values = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:/dev/platform/anthropic-api-key-CCCCCC"
+    }
+  }
+
+  # The AnthropicAPIKeyRead statement must exist and reference the key's ARN.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
+      s.Sid == "AnthropicAPIKeyRead" &&
+      contains(tolist(s.Action), "secretsmanager:GetSecretValue") &&
+      can(regex("anthropic-api-key", tostring(s.Resource)))
+    ])
+    error_message = "AnthropicAPIKeyRead statement must grant GetSecretValue on the anthropic-api-key secret ARN."
+  }
+
+  # The grant must not be a wildcard — only the one specific secret ARN.
+  assert {
+    condition = !anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
+      s.Sid == "AnthropicAPIKeyRead" &&
+      tostring(s.Resource) == "*"
+    ])
+    error_message = "AnthropicAPIKeyRead must use the specific secret ARN, not Resource='*'."
   }
 }
