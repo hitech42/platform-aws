@@ -14,16 +14,22 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from app.src.core.config import settings
 from app.src.db.session import get_db
 from app.src.schemas.secret_request import (
     ApproveRequest,
+    NarrativeSource,
     RequestEventRead,
+    RiskFlagsRead,
     SecretRequestBody,
     SecretRequestRead,
+    SecretRequestSummaryRead,
 )
 from app.src.services import request_lifecycle, service_catalog
 from app.src.services import secret_requests as secret_requests_svc
 from app.src.services import secrets_manager as secrets_manager_svc
+from app.src.services.bedrock import generate_request_narrative
+from app.src.services.risk_checks import compute_risk_flags
 
 log = structlog.get_logger(__name__)
 
@@ -127,3 +133,49 @@ def approve_secret_request(
     db.refresh(req)
     request.state.to_status = req.status
     return SecretRequestRead.model_validate(req)
+
+
+@router.get(
+    "/secret-requests/{request_id}/summary",
+    response_model=SecretRequestSummaryRead,
+)
+def get_secret_request_summary(
+    request_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> SecretRequestSummaryRead:
+    """Return deterministic risk facts plus a Bedrock-generated narrative.
+
+    Facts (ownership match, naming convention, environment risk) are computed
+    by application code and are always present and correct regardless of
+    Bedrock availability.  The narrative field may be null if Bedrock fails —
+    that is an expected degraded state, not an error for this endpoint.
+    """
+    req = secret_requests_svc.get_request(db, request_id)
+    service = service_catalog.get_service(db, req.service_id)
+    events = secret_requests_svc.list_events(db, request_id)
+
+    # requested_by lives on the first PENDING event (actor field), not on the
+    # SecretRequest row itself.  Fall back to "unknown" if events are missing.
+    requested_by = next(
+        (e.actor for e in events if e.status == "PENDING"),
+        "unknown",
+    )
+
+    risk_flags = compute_risk_flags(req, service, requested_by)
+    narrative, error = generate_request_narrative(events, risk_flags, req, service)
+
+    generated_by: NarrativeSource | None
+    if error is not None:
+        generated_by = None
+    elif settings.aws_endpoint_url:
+        generated_by = "stub"
+    else:
+        generated_by = "bedrock"
+
+    return SecretRequestSummaryRead(
+        id=req.id,
+        facts=RiskFlagsRead(**risk_flags),
+        narrative=narrative,
+        narrative_generated_by=generated_by,
+        narrative_error=error,
+    )
