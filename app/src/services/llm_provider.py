@@ -73,13 +73,16 @@ class BedrockNarrativeProvider:
             return _BEDROCK_STUB
 
         client = self._get_client()
+        log.info("bedrock.request", model_id=BEDROCK_MODEL_ID, prompt=prompt)
         try:
             response = client.converse(
                 modelId=BEDROCK_MODEL_ID,
                 messages=[{"role": "user", "content": [{"text": prompt}]}],
                 inferenceConfig={"maxTokens": 300, "temperature": 0.3},
             )
-            return response["output"]["message"]["content"][0]["text"].strip()  # type: ignore[no-any-return]
+            narrative = str(response["output"]["message"]["content"][0]["text"]).strip()
+            log.info("bedrock.response", model_id=BEDROCK_MODEL_ID, narrative=narrative)
+            return narrative
         except ClientError as exc:
             code = exc.response["Error"]["Code"]
             msg = exc.response["Error"]["Message"]
@@ -113,12 +116,15 @@ class AnthropicAPINarrativeProvider:
     def generate_narrative(self, prompt: str) -> str:
         try:
             client = self._get_client()
+            log.info("anthropic.request", model_id=ANTHROPIC_MODEL_ID, prompt=prompt)
             response = client.messages.create(
                 model=ANTHROPIC_MODEL_ID,
                 max_tokens=300,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return response.content[0].text.strip()  # type: ignore[union-attr]
+            narrative = response.content[0].text.strip()  # type: ignore[union-attr]
+            log.info("anthropic.response", model_id=ANTHROPIC_MODEL_ID, narrative=narrative)
+            return narrative
         except anthropic.APIError as exc:
             log.warning("anthropic.error", error=str(exc), model_id=ANTHROPIC_MODEL_ID)
             raise NarrativeError(str(exc)) from exc
