@@ -17,6 +17,7 @@ dependencies = [
     "boto3>=1.34.0",
     "structlog>=24.2.0",
     "psycopg2-binary>=2.9.9",
+    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
