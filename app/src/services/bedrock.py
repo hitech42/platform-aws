@@ -30,7 +30,7 @@ log = structlog.get_logger(__name__)
 
 # Claude Haiku 4.5 via Bedrock cross-region inference — cheapest fast model.
 # Must be enabled in Bedrock console → Model access before first use.
-BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001:0"
+BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 _STUB_RESPONSE = (
     "[stub] Bedrock not available in local dev (AWS_ENDPOINT_URL is set). "

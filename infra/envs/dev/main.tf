@@ -238,8 +238,8 @@ resource "aws_iam_role_policy" "ecs_task" {
         #   foundation-model:  uses * for region because the cross-region profile may
         #     route invocations to us-east-1, us-west-2, or other US regions dynamically
         Resource = [
-          "arn:aws:bedrock:${data.aws_region.current.name}::inference-profile/us.anthropic.claude-haiku-4-5-20251001:0",
-          "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001:0",
+          "arn:aws:bedrock:${data.aws_region.current.name}::inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
         ]
       },
     ]
