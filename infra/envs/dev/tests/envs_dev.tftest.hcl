@@ -399,6 +399,116 @@ run "ecs_task_policy_secrets_scoped" {
   }
 }
 
+# ── ECS task policy: Bedrock must be scoped to the specific model ARNs ────────
+#
+# bedrock:InvokeModel on Resource="*" would allow the app to invoke any model
+# in the account, including expensive models like Opus or Claude 3 Sonnet.
+# The grant must name the exact inference-profile and foundation-model ARNs
+# for the Claude Haiku 4.5 cross-region profile used by the summary endpoint.
+
+run "ecs_task_policy_bedrock_scoped" {
+  command = apply
+
+  override_data {
+    target = module.network.data.aws_availability_zones.available
+    values = {
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
+    }
+  }
+
+  override_data {
+    target = data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+      user_id    = "AIDAXXXXXXXXXXXXXXXXX"
+    }
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = {
+      name        = "us-east-1"
+      description = "US East (N. Virginia)"
+    }
+  }
+
+  override_module {
+    target = module.kms
+    outputs = {
+      kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000001"
+      kms_key_id    = "00000000-0000-0000-0000-000000000001"
+      kms_alias_arn = "arn:aws:kms:us-east-1:123456789012:alias/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.data
+    outputs = {
+      db_endpoint            = "test-dev-postgres.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com"
+      db_resource_id         = "db-AAAAAAAAAAAAAAAAAAAAA"
+      db_arn                 = "arn:aws:rds:us-east-1:123456789012:db:test-dev-postgres"
+      db_instance_identifier = "test-dev-postgres"
+      port                   = 5432
+      database_name          = "platform"
+      db_username            = "platform_app"
+      master_secret_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-AAAAAAAAAAAAAAAAAAAAA-BBBBBB"
+    }
+  }
+
+  override_module {
+    target = module.ecs_service
+    outputs = {
+      ecr_repository_url     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/test"
+      ecr_repository_arn     = "arn:aws:ecr:us-east-1:123456789012:repository/test"
+      ecs_cluster_name       = "test-dev"
+      ecs_service_name       = "test-dev"
+      task_definition_family = "test-dev"
+      alb_dns_name           = "test-dev-1234567890.us-east-1.elb.amazonaws.com"
+      alb_arn_suffix         = "app/test-dev/1234567890abcdef"
+      tg_arn_suffix          = "test-dev/1234567890abcdef"
+      log_group_name         = "/ecs/test-dev"
+      log_group_arn          = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-dev"
+    }
+  }
+
+  override_module {
+    target = module.observability
+    outputs = {
+      alerts_topic_arn = "arn:aws:sns:us-east-1:123456789012:test-dev-alerts"
+      dashboard_name   = "CVSPlatformDev"
+    }
+  }
+
+  override_resource {
+    target = aws_sns_topic.billing_alarm
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:test-dev-billing-alarm"
+    }
+  }
+
+  # bedrock:InvokeModel on Resource="*" would allow invoking any model.
+  assert {
+    condition = !anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
+      contains(tolist(s.Action), "bedrock:InvokeModel") &&
+      try(tostring(s.Resource) == "*", false)
+    ])
+    error_message = "bedrock:InvokeModel must never be granted on Resource='*'. Scope to the specific Claude Haiku model ARNs to prevent invoking other models."
+  }
+
+  # The grant must reference the claude-haiku inference profile by name so an
+  # accidental swap to a more expensive model is caught by this test.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.ecs_task.policy).Statement :
+      contains(tolist(s.Action), "bedrock:InvokeModel") &&
+      try(anytrue([for r in s.Resource : can(regex("claude-haiku", tostring(r)))]), false)
+    ])
+    error_message = "bedrock:InvokeModel Resource must reference the claude-haiku model ARN. Wildcard or wrong model would allow invoking unintended (potentially expensive) models."
+  }
+}
+
 # ── ECS task execution policy: ECR and CloudWatch access must be scoped ───────
 #
 # ecr:GetAuthorizationToken legitimately requires Resource="*" (AWS limitation —

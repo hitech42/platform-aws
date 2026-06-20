@@ -183,10 +183,11 @@ resource "aws_iam_role_policy" "ecs_task_execution" {
 #   iam (creates task role) → kms (key policy references task role ARN)
 #   → data (needs kms_key_arn) → [this policy needs data.cluster_resource_id]
 #
-# All three permissions are scoped to the minimum necessary resource:
-#   rds-db:connect   → exact cluster + username ARN (not wildcard cluster)
-#   secretsmanager   → platform/* namespace only (NOT rds!* master credential)
-#   kms:Decrypt      → this environment's CMK ARN only
+# All permissions are scoped to the minimum necessary resource:
+#   rds-db:connect      → exact instance + username ARN (not wildcard instance)
+#   secretsmanager      → platform/* namespace only (NOT rds!* master credential)
+#   kms:Decrypt         → this environment's CMK ARN only
+#   bedrock:InvokeModel → specific Claude Haiku model + inference-profile ARNs only
 
 resource "aws_iam_role_policy" "ecs_task" {
   name = "${local.prefix}-ecs-task-policy"
@@ -227,6 +228,19 @@ resource "aws_iam_role_policy" "ecs_task" {
         # this access directly, but having both makes the grant visible from
         # the role's perspective (not just the key's perspective).
         Resource = module.kms.kms_key_arn
+      },
+      {
+        Sid    = "BedrockInvokeModel"
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel"]
+        # Cross-region inference profiles require two ARNs:
+        #   inference-profile: the system-defined profile that routes across US regions
+        #   foundation-model:  uses * for region because the cross-region profile may
+        #     route invocations to us-east-1, us-west-2, or other US regions dynamically
+        Resource = [
+          "arn:aws:bedrock:${data.aws_region.current.name}::inference-profile/us.anthropic.claude-haiku-4-5-20251001:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001:0",
+        ]
       },
     ]
   })
