@@ -183,10 +183,11 @@ resource "aws_iam_role_policy" "ecs_task_execution" {
 #   iam (creates task role) → kms (key policy references task role ARN)
 #   → data (needs kms_key_arn) → [this policy needs data.cluster_resource_id]
 #
-# All three permissions are scoped to the minimum necessary resource:
-#   rds-db:connect   → exact cluster + username ARN (not wildcard cluster)
-#   secretsmanager   → platform/* namespace only (NOT rds!* master credential)
-#   kms:Decrypt      → this environment's CMK ARN only
+# All permissions are scoped to the minimum necessary resource:
+#   rds-db:connect      → exact instance + username ARN (not wildcard instance)
+#   secretsmanager      → platform/* namespace only (NOT rds!* master credential)
+#   kms:Decrypt         → this environment's CMK ARN only
+#   bedrock:InvokeModel → specific Claude Haiku model + inference-profile ARNs only
 
 resource "aws_iam_role_policy" "ecs_task" {
   name = "${local.prefix}-ecs-task-policy"
@@ -228,6 +229,29 @@ resource "aws_iam_role_policy" "ecs_task" {
         # the role's perspective (not just the key's perspective).
         Resource = module.kms.kms_key_arn
       },
+      {
+        Sid    = "BedrockInvokeModel"
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel"]
+        # Cross-region inference profiles require two ARNs:
+        #   inference-profile: the system-defined profile that routes across US regions
+        #   foundation-model:  uses * for region because the cross-region profile may
+        #     route invocations to us-east-1, us-west-2, or other US regions dynamically
+        Resource = [
+          "arn:aws:bedrock:${data.aws_region.current.name}::inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+        ]
+      },
+      {
+        Sid    = "AnthropicAPIKeyRead"
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        # Scoped to the single Anthropic API key secret — read-only for startup
+        # key loading (app/src/services/llm_provider.py:_load_anthropic_api_key).
+        # Kept separate from SecretsManagerAppSecrets: different action set
+        # (read-only vs. full lifecycle) and different resource path.
+        Resource = aws_secretsmanager_secret.anthropic_api_key.arn
+      },
     ]
   })
 }
@@ -252,6 +276,25 @@ module "observability" {
   rds_instance_identifier = module.data.db_instance_identifier
 
   log_group_name = module.ecs_service.log_group_name
+}
+
+# ── Anthropic API key credential ─────────────────────────────────────────────
+#
+# Creates the secret shell only — the actual API key value must be set
+# out-of-band after apply:
+#   aws secretsmanager put-secret-value \
+#     --secret-id /dev/platform/anthropic-api-key \
+#     --secret-string "sk-ant-..."
+#
+# The app reads this secret at startup via _load_anthropic_api_key() in
+# app/src/services/llm_provider.py, only when aws_endpoint_url is unset
+# (real AWS).  Local dev uses the ANTHROPIC_API_KEY env var instead.
+
+resource "aws_secretsmanager_secret" "anthropic_api_key" {
+  name        = "/${var.environment}/platform/anthropic-api-key"
+  description = "Anthropic API key for the ${local.prefix} LLM narrative provider"
+  kms_key_id  = module.kms.kms_key_arn
+  tags        = local.tags
 }
 
 # ── Billing alarm ─────────────────────────────────────────────────────────────

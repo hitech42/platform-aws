@@ -24,7 +24,6 @@ def _build_engine() -> Engine:
             url,
             connect_args=get_connect_args(),
             pool_pre_ping=True,
-            echo=settings.environment == "dev",
         )
 
     # NullPool: IAM auth tokens expire after 15 minutes, so every physical
@@ -34,7 +33,6 @@ def _build_engine() -> Engine:
         url,
         connect_args=get_connect_args(),
         poolclass=NullPool,
-        echo=settings.environment == "dev",
     )
 
     @event.listens_for(engine, "do_connect")

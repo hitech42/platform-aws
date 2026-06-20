@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
 
+    # LLM providers
+    anthropic_api_key: str | None = None
+
     # App
     log_level: str = "INFO"
     environment: Literal["dev", "staging", "prod"] = "dev"

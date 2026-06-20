@@ -10,7 +10,8 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 - Secret-request lifecycle (`PENDING → APPROVED → PROVISIONING → PROVISIONED | FAILED`)
 - Immutable audit trail (one event row per state transition)
 - AWS Secrets Manager provisioning via `approve` endpoint
-- 123 tests passing (unit + integration via testcontainers)
+- AI-powered request summary (`GET /summary`) — deterministic risk facts + LLM narrative (Bedrock or Anthropic API, runtime-switchable via DB config, no redeploy)
+- 175 tests passing (unit + integration via testcontainers)
 - GitHub Actions CI on every PR (lint, unit, integration)
 
 ## Prerequisites
@@ -23,7 +24,6 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 
 ## Roadmap / Work in Progress (targeted to be ready by the technical interview date)
 - Staging environment (E5)
-- Bedrock enhancement 
 
 ## Setup
 
@@ -103,6 +103,16 @@ curl -s http://localhost:8000/readyz | python3 -m json.tool
 | `GET` | `/api/v1/secret-requests/{id}` | Get a secret request |
 | `GET` | `/api/v1/secret-requests/{id}/events` | Audit trail for a request |
 | `POST` | `/api/v1/secret-requests/{id}/approve` | Approve and provision the secret |
+| `GET` | `/api/v1/secret-requests/{id}/summary` | Deterministic risk facts + LLM narrative |
+
+> **`/summary` providers**: the active LLM provider is read from the `config` table (`key = 'llm_provider'`). Switch at runtime without a restart — change takes effect within 30 seconds:
+> ```sql
+> -- switch to Bedrock (default on AWS)
+> UPDATE config SET value = 'bedrock' WHERE key = 'llm_provider';
+> -- switch to Anthropic API (requires ANTHROPIC_API_KEY env var in local dev)
+> UPDATE config SET value = 'anthropic_api' WHERE key = 'llm_provider';
+> ```
+> In local dev with `AWS_ENDPOINT_URL` set, the Bedrock provider returns a labeled `[stub]` (LocalStack has no Bedrock). The `anthropic_api` provider calls the real Anthropic API — set `ANTHROPIC_API_KEY` in `.env` to use it. The `facts` block is always computed from Postgres regardless of which provider is active or whether it fails.
 
 All error responses use the standard shape:
 ```json
@@ -292,7 +302,7 @@ cd infra/modules/observability && terraform init -backend=false && terraform tes
 cd infra/envs/dev             && terraform init -backend=false && terraform test
 ```
 
-All 32 tests use `mock_provider "aws" {}` — no real AWS credentials required.
+All 33 tests use `mock_provider "aws" {}` — no real AWS credentials required.
 
 ### Observability
 

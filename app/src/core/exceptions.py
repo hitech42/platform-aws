@@ -44,3 +44,16 @@ class ValidationError(AppError):
 
     status_code = 422
     code = "VALIDATION_ERROR"
+
+
+class NarrativeError(Exception):
+    """Raised by LLM provider implementations when narrative generation fails.
+
+    Intentionally does NOT inherit AppError — it carries no HTTP status code.
+    The summary route catches it and returns narrative=null / narrative_error
+    rather than propagating a 5xx response.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message

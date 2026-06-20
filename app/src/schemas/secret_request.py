@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+NarrativeSource = Literal["bedrock", "stub", "anthropic_api"]
+
 Environment = Literal["dev", "staging", "prod"]
 RequestStatus = Literal["PENDING", "APPROVED", "PROVISIONING", "PROVISIONED", "FAILED"]
 
@@ -73,3 +75,30 @@ class RequestEventRead(BaseModel):
     timestamp: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Summary endpoint schemas ────────────────────────────────────────────────
+
+
+class RiskFlagsRead(BaseModel):
+    """Deterministic risk checks computed by application code — never by Bedrock."""
+
+    ownership_mismatch: bool
+    naming_violations: list[str]
+    is_production: bool
+    has_any_flag: bool
+
+
+class SecretRequestSummaryRead(BaseModel):
+    """Response shape for GET /secret-requests/{id}/summary.
+
+    The facts/narrative split is intentional and must remain visible in the
+    response: facts are guaranteed-correct (computed deterministically);
+    narrative is generated text (Bedrock) that may be absent if Bedrock fails.
+    """
+
+    id: uuid.UUID
+    facts: RiskFlagsRead
+    narrative: str | None
+    narrative_generated_by: NarrativeSource | None
+    narrative_error: str | None
