@@ -11,7 +11,7 @@ from botocore.exceptions import ClientError
 
 from app.src.services.bedrock import (
     BEDROCK_MODEL_ID,
-    _build_prompt,
+    build_prompt,
     generate_request_narrative,
 )
 
@@ -73,18 +73,18 @@ def _make_client_error(code: str) -> ClientError:
     )
 
 
-# ── _build_prompt ─────────────────────────────────────────────────────────────
+# ── build_prompt ─────────────────────────────────────────────────────────────
 
 
 def test_prompt_contains_service_name() -> None:
     events = [_make_event("PENDING", "alice@example.com")]
-    prompt = _build_prompt(events, _clean_risk_flags(), _make_request(), _make_service())
+    prompt = build_prompt(events, _clean_risk_flags(), _make_request(), _make_service())
     assert "payments-api" in prompt
 
 
 def test_prompt_contains_logical_name_and_environment() -> None:
     events = [_make_event("PENDING", "alice@example.com")]
-    prompt = _build_prompt(
+    prompt = build_prompt(
         events,
         _clean_risk_flags(),
         _make_request("stripe-key", "prod"),
@@ -97,27 +97,27 @@ def test_prompt_contains_logical_name_and_environment() -> None:
 def test_prompt_contains_ownership_mismatch_flag() -> None:
     events = [_make_event("PENDING", "bob@example.com")]
     flags = _clean_risk_flags(ownership_mismatch=True)
-    prompt = _build_prompt(events, flags, _make_request(), _make_service())
+    prompt = build_prompt(events, flags, _make_request(), _make_service())
     assert "Ownership mismatch" in prompt
 
 
 def test_prompt_contains_naming_violation() -> None:
     events = [_make_event("PENDING", "alice@example.com")]
     flags = _clean_risk_flags(naming_violations=["name must be lowercase, hyphen-separated"])
-    prompt = _build_prompt(events, flags, _make_request(), _make_service())
+    prompt = build_prompt(events, flags, _make_request(), _make_service())
     assert "lowercase" in prompt
 
 
 def test_prompt_contains_production_flag() -> None:
     events = [_make_event("PENDING", "alice@example.com")]
     flags = _clean_risk_flags(is_production=True)
-    prompt = _build_prompt(events, flags, _make_request(environment="prod"), _make_service())
+    prompt = build_prompt(events, flags, _make_request(environment="prod"), _make_service())
     assert "Production environment" in prompt
 
 
 def test_prompt_no_active_flags_shows_none() -> None:
     events = [_make_event("PENDING", "alice@example.com")]
-    prompt = _build_prompt(events, _clean_risk_flags(), _make_request(), _make_service())
+    prompt = build_prompt(events, _clean_risk_flags(), _make_request(), _make_service())
     assert "None: all checks passed" in prompt
 
 
@@ -126,7 +126,7 @@ def test_prompt_contains_timeline_entries() -> None:
         _make_event("PENDING", "alice@example.com"),
         _make_event("APPROVED", "bob@example.com"),
     ]
-    prompt = _build_prompt(events, _clean_risk_flags(), _make_request(), _make_service())
+    prompt = build_prompt(events, _clean_risk_flags(), _make_request(), _make_service())
     assert "PENDING" in prompt
     assert "APPROVED" in prompt
     assert "alice@example.com" in prompt

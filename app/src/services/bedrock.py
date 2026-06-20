@@ -50,7 +50,7 @@ def _client() -> Any:
     return boto3.client("bedrock-runtime", **kwargs)
 
 
-def _build_prompt(
+def build_prompt(
     events: list[RequestEvent],
     risk_flags: dict[str, Any],
     secret_request: SecretRequest,
@@ -113,7 +113,7 @@ def generate_request_narrative(
         )
         return _STUB_RESPONSE, None
 
-    prompt = _build_prompt(events, risk_flags, secret_request, service)
+    prompt = build_prompt(events, risk_flags, secret_request, service)
 
     client = _client()
     try:

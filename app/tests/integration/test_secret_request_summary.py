@@ -1,18 +1,33 @@
 """Integration tests for GET /api/v1/secret-requests/{id}/summary.
 
 Verifies that deterministic risk facts are computed correctly from real DB data
-and that Bedrock failures never corrupt or suppress those facts.
+and that LLM provider failures never corrupt or suppress those facts.
 
-generate_request_narrative is mocked throughout — the integration suite tests the
-HTTP/DB layer, not AWS. Bedrock unit tests live in tests/unit/test_bedrock.py.
+get_active_provider is mocked throughout — the integration suite tests the
+HTTP/DB layer, not LLM providers. Provider unit tests live in
+tests/unit/test_llm_provider.py.
 """
 
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
+from app.src.core.exceptions import NarrativeError
+
 _STUB_NARRATIVE = "Stub narrative returned by mock for integration test."
+
+
+def _mock_provider(narrative: str = _STUB_NARRATIVE) -> MagicMock:
+    mock = MagicMock()
+    mock.generate_narrative.return_value = narrative
+    return mock
+
+
+def _failing_provider(error_message: str) -> MagicMock:
+    mock = MagicMock()
+    mock.generate_narrative.side_effect = NarrativeError(error_message)
+    return mock
 
 
 def _create_service(client: TestClient, owner_email: str = "owner@co.com") -> dict:  # type: ignore[type-arg]
@@ -43,15 +58,14 @@ def _create_request(client: TestClient, service_id: str, **overrides: object) ->
 def test_summary_ownership_mismatch_flag_is_set(client: TestClient) -> None:
     """Core fact: requester != service owner always sets ownership_mismatch=True.
 
-    This is the primary Stage 5 assertion: facts are deterministic and derived
-    from DB data, never from Bedrock output.
+    Facts are deterministic and derived from DB data, never from LLM output.
     """
     svc = _create_service(client, owner_email="alice@co.com")
     req = _create_request(client, svc["id"], requested_by="bob@co.com")
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.generate_request_narrative",
-        return_value=(_STUB_NARRATIVE, None),
+        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        return_value=_mock_provider(),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
 
@@ -77,8 +91,8 @@ def test_summary_no_flags_when_owner_requests_clean_name(client: TestClient) -> 
     )
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.generate_request_narrative",
-        return_value=(_STUB_NARRATIVE, None),
+        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        return_value=_mock_provider(),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
 
@@ -102,8 +116,8 @@ def test_summary_production_flag_is_set(client: TestClient) -> None:
     )
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.generate_request_narrative",
-        return_value=(_STUB_NARRATIVE, None),
+        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        return_value=_mock_provider(),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
 
@@ -114,22 +128,22 @@ def test_summary_production_flag_is_set(client: TestClient) -> None:
 
 
 def test_summary_narrative_error_does_not_affect_facts(client: TestClient) -> None:
-    """When Bedrock fails, facts are still correct and narrative_error is populated."""
+    """When the LLM provider fails, facts are still correct and narrative_error is set."""
     svc = _create_service(client, owner_email="alice@co.com")
     req = _create_request(client, svc["id"], requested_by="bob@co.com")
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.generate_request_narrative",
-        return_value=(None, "AccessDeniedException: User is not authorized to invoke Bedrock"),
+        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        return_value=_failing_provider(
+            "AccessDeniedException: User is not authorized to invoke Bedrock"
+        ),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
 
     assert r.status_code == 200
     data = r.json()
-    # Facts must be correct even when Bedrock is unavailable.
     assert data["facts"]["ownership_mismatch"] is True
     assert data["facts"]["has_any_flag"] is True
-    # Narrative fields reflect the Bedrock failure gracefully.
     assert data["narrative"] is None
     assert data["narrative_generated_by"] is None
     assert "AccessDeniedException" in (data["narrative_error"] or "")

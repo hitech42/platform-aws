@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-NarrativeSource = Literal["bedrock", "stub"]
+NarrativeSource = Literal["bedrock", "stub", "anthropic_api"]
 
 Environment = Literal["dev", "staging", "prod"]
 RequestStatus = Literal["PENDING", "APPROVED", "PROVISIONING", "PROVISIONED", "FAILED"]
