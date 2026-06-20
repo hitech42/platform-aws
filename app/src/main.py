@@ -7,19 +7,25 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.src.api.v1.router import v1_router
-from app.src.api.v1.routes.health import router as health_router
+# Configure logging before importing any module that may log at import time
+# (e.g. llm_provider._load_anthropic_api_key). Without this, those early log
+# calls use structlog's unconfigured default renderer instead of JSONRenderer,
+# producing plain-text output that is invisible to CloudWatch JSON filters.
 from app.src.core.config import settings
-from app.src.core.exceptions import AppError
 from app.src.core.logging import configure_logging
-from app.src.core.middleware import RequestLoggingMiddleware
+
+configure_logging(settings.log_level)
+
+from app.src.api.v1.router import v1_router  # noqa: E402
+from app.src.api.v1.routes.health import router as health_router  # noqa: E402
+from app.src.core.exceptions import AppError  # noqa: E402
+from app.src.core.middleware import RequestLoggingMiddleware  # noqa: E402
 
 log = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    configure_logging(settings.log_level)
     yield
 
 
