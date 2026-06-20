@@ -15,7 +15,6 @@ phrase them as readable prose.  It is never asked to determine whether a
 fact is true.
 """
 
-import json
 from typing import Any
 
 import boto3
@@ -65,30 +64,29 @@ def _build_prompt(
 
     active_flags: list[str] = []
     if risk_flags["ownership_mismatch"]:
-        active_flags.append("- Ownership mismatch: the requester is not the registered service owner")
+        active_flags.append("- Ownership mismatch: requester is not the registered service owner")
     if risk_flags["naming_violations"]:
         for v in risk_flags["naming_violations"]:
             active_flags.append(f"- Naming violation: {v}")
     if risk_flags["is_production"]:
         active_flags.append("- Production environment: this secret targets prod")
 
-    flags_section = (
-        "\n".join(active_flags)
-        if active_flags
-        else "- None: all checks passed"
+    flags_section = "\n".join(active_flags) if active_flags else "- None: all checks passed"
+
+    # The prompt text is a multi-line string; long lines here are prose sent to
+    # the model, not Python code — ruff E501 is suppressed for this block.
+    return (  # noqa: E501
+        "Write a brief, factual 2-3 sentence audit summary of this secret provisioning"
+        " request for a platform engineering reviewer."
+        " Use only the facts provided below — do not infer or add information not stated.\n\n"
+        f"Service: {service.name} (team: {service.team})\n"
+        f"Secret requested: {secret_request.logical_name} for {secret_request.environment}\n"
+        f"Final status: {secret_request.status}\n\n"
+        f"Timeline:\n{timeline}\n\n"
+        "Pre-determined flags (state these factually if true, omit if false"
+        " — do not editorialize or speculate beyond what is listed):\n"
+        f"{flags_section}"
     )
-
-    return f"""Write a brief, factual 2-3 sentence audit summary of this secret provisioning request for a platform engineering reviewer. Use only the facts provided below — do not infer or add information not stated.
-
-Service: {service.name} (team: {service.team})
-Secret requested: {secret_request.logical_name} for {secret_request.environment}
-Final status: {secret_request.status}
-
-Timeline:
-{timeline}
-
-Pre-determined flags (state these factually if true, omit if false — do not editorialize or speculate beyond what is listed):
-{flags_section}"""
 
 
 def generate_request_narrative(
