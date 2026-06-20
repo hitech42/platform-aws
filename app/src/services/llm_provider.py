@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.src.core.config import settings
 from app.src.core.exceptions import NarrativeError
-from app.src.core.runtime_config import get_llm_provider
+from app.src.core.runtime_config.llm_provider_config import llm_provider_config
 
 log = structlog.get_logger(__name__)
 
@@ -157,7 +157,7 @@ _anthropic_provider = AnthropicAPINarrativeProvider(_ANTHROPIC_API_KEY)
 
 def get_active_provider(db: Session) -> NarrativeProvider:
     """Return the pre-instantiated provider selected by the cached runtime config."""
-    provider_name = get_llm_provider(db)
+    provider_name = llm_provider_config.get(db)
     if provider_name == "bedrock":
         return _bedrock_provider
     return _anthropic_provider

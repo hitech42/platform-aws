@@ -180,14 +180,16 @@ def test_anthropic_client_is_created_lazily() -> None:
 
 
 def test_get_active_provider_returns_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.src.services.llm_provider.get_llm_provider", lambda _db: "bedrock")
+    mock_config = MagicMock()
+    mock_config.get.return_value = "bedrock"
+    monkeypatch.setattr("app.src.services.llm_provider.llm_provider_config", mock_config)
     provider = get_active_provider(MagicMock())
     assert isinstance(provider, BedrockNarrativeProvider)
 
 
 def test_get_active_provider_returns_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "app.src.services.llm_provider.get_llm_provider", lambda _db: "anthropic_api"
-    )
+    mock_config = MagicMock()
+    mock_config.get.return_value = "anthropic_api"
+    monkeypatch.setattr("app.src.services.llm_provider.llm_provider_config", mock_config)
     provider = get_active_provider(MagicMock())
     assert isinstance(provider, AnthropicAPINarrativeProvider)
