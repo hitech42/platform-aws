@@ -485,6 +485,44 @@ Use **`extended_statistic = "p95"`** on the `alb_latency_p95` alarm with `thresh
 
 ---
 
+## ADR-017: Facts/Narrative Separation for the AI Summary Endpoint
+
+**Date**: 2026-06-19
+**Status**: Accepted
+
+### Context
+
+`GET /api/v1/secret-requests/{id}/summary` combines two types of information:
+
+1. **Deterministic risk facts**: ownership match (requester vs. registered service owner), naming-convention compliance, and environment risk (prod vs. non-prod). These are computable directly from Postgres — no external service is required.
+2. **Natural-language narrative**: a brief audit summary phrased as readable prose for a human reviewer.
+
+The key design question is whether Bedrock should *determine* facts or only *phrase* pre-computed facts.
+
+### Decision
+
+**Application code always computes all facts. Bedrock only phrases pre-computed facts as readable prose — it never determines whether a flag is true or false.**
+
+The response always contains a `facts` object with deterministically computed values. The `narrative` field is populated by `generate_request_narrative()` (Bedrock call), but its absence or content never affects the accuracy of `facts`.
+
+Model: **Claude Haiku 4.5 via Bedrock cross-region inference profile** (`us.anthropic.claude-haiku-4-5-20251001:0`) — cheapest fast model, ~$0.001 per call at this token count.
+
+### Rationale
+
+- **Correctness is non-negotiable**: risk flags inform approver security decisions. An LLM can hallucinate or contradict the database record; application code reading Postgres cannot.
+- **Facts must survive Bedrock failures**: if Bedrock is throttling or inaccessible, the endpoint returns `narrative=null` and `narrative_error="..."` but always returns correct `facts`. The endpoint is always useful even when Bedrock is unavailable.
+- **No model lock-in for correctness**: if the model is deprecated or swapped, facts are unaffected. `narrative_generated_by` makes the narrative source visible so consumers can reason about its reliability separately from facts.
+- **Audit integrity**: ownership and naming decisions determined by an external LLM would make the audit trail dependent on model interpretation. Deterministic code makes the audit trail unambiguous and reproducible.
+- **LocalStack compatibility**: LocalStack Community Edition does not implement Bedrock. When `AWS_ENDPOINT_URL` is set, `generate_request_narrative` returns a labeled `[stub]` string immediately without any boto3 call — facts are always accurate, the stub signals the narrative is not real.
+
+### Trade-offs
+
+- **Two-phase response**: `facts` is always deterministic; `narrative` is generated text. API consumers must not parse `narrative` to extract security decisions.
+- **Bedrock cost on every summary call**: ~$0.001 per call (Haiku 4.5 pricing at 300-token output). Acceptable at low internal call volume. If volume grows, add caching keyed on `(request_id, status)`.
+- **IAM resource wildcard for foundation model region**: the `bedrock:InvokeModel` policy uses `arn:aws:bedrock:*::foundation-model/...` (wildcard region) because the cross-region inference profile may route to any US region dynamically. The model ID is fully specified — only the region is wildcarded.
+
+---
+
 ## ADR-016: Local Development Strategy — Containerised Postgres + LocalStack + Native App Process
 
 **Date**: 2026-06-19

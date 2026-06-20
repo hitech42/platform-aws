@@ -10,7 +10,8 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 - Secret-request lifecycle (`PENDING → APPROVED → PROVISIONING → PROVISIONED | FAILED`)
 - Immutable audit trail (one event row per state transition)
 - AWS Secrets Manager provisioning via `approve` endpoint
-- 123 tests passing (unit + integration via testcontainers)
+- AI-powered request summary (`GET /summary`) — deterministic risk facts + Bedrock-generated narrative
+- 175 tests passing (unit + integration via testcontainers)
 - GitHub Actions CI on every PR (lint, unit, integration)
 
 ## Prerequisites
@@ -23,7 +24,6 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 
 ## Roadmap / Work in Progress (targeted to be ready by the technical interview date)
 - Staging environment (E5)
-- Bedrock enhancement 
 
 ## Setup
 
@@ -103,6 +103,9 @@ curl -s http://localhost:8000/readyz | python3 -m json.tool
 | `GET` | `/api/v1/secret-requests/{id}` | Get a secret request |
 | `GET` | `/api/v1/secret-requests/{id}/events` | Audit trail for a request |
 | `POST` | `/api/v1/secret-requests/{id}/approve` | Approve and provision the secret |
+| `GET` | `/api/v1/secret-requests/{id}/summary` | Risk facts + Bedrock narrative |
+
+> **`/summary` in local dev**: the Bedrock narrative is automatically stubbed when `AWS_ENDPOINT_URL` is set (LocalStack path). The `facts` block is always computed from Postgres and is always accurate. To use real Bedrock on AWS, enable model access for `Claude Haiku 4.5` in the Bedrock console → Model access for your account and region before calling this endpoint.
 
 All error responses use the standard shape:
 ```json
@@ -292,7 +295,7 @@ cd infra/modules/observability && terraform init -backend=false && terraform tes
 cd infra/envs/dev             && terraform init -backend=false && terraform test
 ```
 
-All 32 tests use `mock_provider "aws" {}` — no real AWS credentials required.
+All 33 tests use `mock_provider "aws" {}` — no real AWS credentials required.
 
 ### Observability
 

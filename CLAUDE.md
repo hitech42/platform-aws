@@ -89,6 +89,7 @@ This service lets internal dev teams self-serve platform requests without openin
 | `GET` | `/api/v1/secret-requests/{id}` | Get secret request by ID |
 | `GET` | `/api/v1/secret-requests/{id}/events` | Audit trail for a request |
 | `POST` | `/api/v1/secret-requests/{id}/approve` | Approve → provision → PROVISIONED or FAILED |
+| `GET` | `/api/v1/secret-requests/{id}/summary` | Deterministic risk facts + Bedrock narrative |
 
 ### Exception-handling pattern
 
@@ -134,6 +135,40 @@ The `approve` route commits twice: once after `PROVISIONING` (before the AWS cal
 - Only `generate_value=True` is supported; requests with `generate_value=False` are rejected with 422 at creation time.
 - Random values are generated with `secrets.token_urlsafe(32)` — never logged.
 - `create_app_secret` raises `ConflictError` on `ResourceExistsException` and re-raises all other `ClientError`s unchanged.
+
+## Bedrock / Summary Endpoint Conventions
+
+`GET /api/v1/secret-requests/{id}/summary` returns two independent sections:
+
+- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_checks.py` from Postgres data. Bedrock never determines facts.
+- **`narrative`** — generated text from Bedrock (`bedrock-runtime` `converse` API). May be `null` if Bedrock is unavailable. Its absence must never prevent callers from reading `facts`.
+
+### Design rule (ADR-017)
+
+**Bedrock only phrases pre-computed facts. It never determines whether a fact is true.** The prompt passed to Bedrock already contains the computed flag values; Bedrock is asked only to render them as readable prose for a human reviewer.
+
+### `requested_by` extraction
+
+`SecretRequest` has no `requested_by` column. The field is stored as the `actor` of the first `PENDING` `RequestEvent`. The summary route extracts it with:
+
+```python
+requested_by = next((e.actor for e in events if e.status == "PENDING"), "unknown")
+```
+
+`"unknown"` is unconditionally treated as an ownership mismatch by `check_ownership_mismatch`.
+
+### LocalStack stub path
+
+LocalStack CE does not implement Bedrock. When `settings.aws_endpoint_url` is set, `generate_request_narrative` returns a `[stub]` string immediately without making any boto3 call. The `narrative_generated_by` field is `"stub"` in this case; `"bedrock"` on a real AWS call; `null` on error.
+
+### Bedrock IAM model access
+
+The ECS task role has `bedrock:InvokeModel` scoped to two ARNs:
+
+- `arn:aws:bedrock:{region}::inference-profile/us.anthropic.claude-haiku-4-5-20251001:0`
+- `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001:0`
+
+The region wildcard on the foundation model ARN is required because cross-region inference profiles route dynamically to any US region. The model must also be enabled in the Bedrock console → Model access before first use in the AWS account.
 
 ## AWS / LocalStack Conventions
 
