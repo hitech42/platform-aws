@@ -3,10 +3,7 @@
 Pure functions — no mocks, no I/O, no DB, no AWS.
 """
 
-import uuid
 from unittest.mock import MagicMock
-
-import pytest
 
 from app.src.services.risk_checks import (
     check_naming_convention,
@@ -14,7 +11,6 @@ from app.src.services.risk_checks import (
     check_production_risk,
     compute_risk_flags,
 )
-
 
 # ── check_ownership_mismatch ──────────────────────────────────────────────────
 

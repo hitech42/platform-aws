@@ -3,7 +3,7 @@
 boto3 bedrock-runtime client is fully mocked throughout.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +15,6 @@ from app.src.services.bedrock import (
     generate_request_narrative,
 )
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -24,7 +23,7 @@ def _make_event(status: str, actor: str, detail: str | None = None) -> MagicMock
     e.status = status
     e.actor = actor
     e.detail = detail
-    e.timestamp = datetime(2026, 6, 19, 10, 0, 0, tzinfo=timezone.utc)
+    e.timestamp = datetime(2026, 6, 19, 10, 0, 0, tzinfo=UTC)
     return e
 
 
@@ -136,7 +135,9 @@ def test_prompt_contains_timeline_entries() -> None:
 
 
 def test_stub_returned_when_endpoint_url_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.src.services.bedrock.settings.aws_endpoint_url", "http://localhost:4566")
+    monkeypatch.setattr(
+        "app.src.services.bedrock.settings.aws_endpoint_url", "http://localhost:4566"
+    )
 
     events = [_make_event("PENDING", "alice@example.com")]
     narrative, error = generate_request_narrative(
@@ -149,7 +150,9 @@ def test_stub_returned_when_endpoint_url_set(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_stub_does_not_call_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.src.services.bedrock.settings.aws_endpoint_url", "http://localhost:4566")
+    monkeypatch.setattr(
+        "app.src.services.bedrock.settings.aws_endpoint_url", "http://localhost:4566"
+    )
 
     with patch("app.src.services.bedrock.boto3.client") as mock_boto:
         generate_request_narrative(
