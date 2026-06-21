@@ -1,7 +1,7 @@
 """Unit tests for SecretRequestLifecycleService — repos, DB, and AWS are mocked."""
 
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,9 +15,7 @@ from app.src.services.secret_request_lifecycle_service import (
     ApproveResult,
     SecretRequestLifecycleService,
 )
-
-_SVC_MODULE = "app.src.services.secret_request_lifecycle_service"
-
+from app.src.services.secrets_manager_service import SecretsManager
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -39,18 +37,21 @@ def _make_svc() -> tuple[
     MagicMock,
     MagicMock,
     MagicMock,
+    MagicMock,
 ]:
+    mock_secrets_manager = MagicMock(spec=SecretsManager)
     secret_request_repo = MagicMock(spec=SecretRequestRepository)
     request_event_repo = MagicMock(spec=RequestEventRepository)
     service_repo = MagicMock(spec=ServiceRepository)
     db = MagicMock()
     svc = SecretRequestLifecycleService(
         db=db,
+        secrets_manager=mock_secrets_manager,
         secret_request_repo=secret_request_repo,
         request_event_repo=request_event_repo,
         service_repo=service_repo,
     )
-    return svc, db, secret_request_repo, request_event_repo, service_repo
+    return svc, db, mock_secrets_manager, secret_request_repo, request_event_repo, service_repo
 
 
 # ── _VALID_TRANSITIONS map completeness ───────────────────────────────────────
@@ -70,7 +71,7 @@ def test_all_target_statuses_are_valid() -> None:
 
 
 def test_transition_pending_to_approved() -> None:
-    svc, _, _, event_repo, _ = _make_svc()
+    svc, _, _, _, event_repo, _ = _make_svc()
     req = _make_request("PENDING")
     svc._transition(req, "APPROVED", actor="approver@co.com")
 
@@ -81,7 +82,7 @@ def test_transition_pending_to_approved() -> None:
 
 
 def test_transition_approved_to_provisioning() -> None:
-    svc, _, _, event_repo, _ = _make_svc()
+    svc, _, _, _, event_repo, _ = _make_svc()
     req = _make_request("APPROVED")
     svc._transition(req, "PROVISIONING", actor="system")
 
@@ -92,7 +93,7 @@ def test_transition_approved_to_provisioning() -> None:
 
 
 def test_transition_provisioning_to_provisioned_with_detail() -> None:
-    svc, _, _, event_repo, _ = _make_svc()
+    svc, _, _, _, event_repo, _ = _make_svc()
     req = _make_request("PROVISIONING")
     arn = "arn:aws:sm:us-east-1:123:secret:x"
     svc._transition(req, "PROVISIONED", actor="system", detail=arn)
@@ -104,7 +105,7 @@ def test_transition_provisioning_to_provisioned_with_detail() -> None:
 
 
 def test_transition_provisioning_to_failed_with_detail() -> None:
-    svc, _, _, event_repo, _ = _make_svc()
+    svc, _, _, _, event_repo, _ = _make_svc()
     req = _make_request("PROVISIONING")
     svc._transition(req, "FAILED", actor="system", detail="AccessDenied")
 
@@ -133,7 +134,7 @@ def test_transition_provisioning_to_failed_with_detail() -> None:
     ],
 )
 def test_invalid_transition_raises_and_does_not_mutate(from_status: str, to_status: str) -> None:
-    svc, _, _, event_repo, _ = _make_svc()
+    svc, _, _, _, event_repo, _ = _make_svc()
     req = _make_request(from_status)
 
     with pytest.raises(InvalidStateError) as exc_info:
@@ -147,7 +148,7 @@ def test_invalid_transition_raises_and_does_not_mutate(from_status: str, to_stat
 
 
 def test_terminal_provisioned_cannot_transition() -> None:
-    svc, _, _, _, _ = _make_svc()
+    svc, _, _, _, _, _ = _make_svc()
     req = _make_request("PROVISIONED")
     with pytest.raises(InvalidStateError):
         svc._transition(req, "PENDING", actor="actor@co.com")
@@ -155,7 +156,7 @@ def test_terminal_provisioned_cannot_transition() -> None:
 
 
 def test_terminal_failed_cannot_transition() -> None:
-    svc, _, _, _, _ = _make_svc()
+    svc, _, _, _, _, _ = _make_svc()
     req = _make_request("FAILED")
     with pytest.raises(InvalidStateError):
         svc._transition(req, "APPROVED", actor="actor@co.com")
@@ -166,7 +167,7 @@ def test_terminal_failed_cannot_transition() -> None:
 
 
 def test_create_request_commits_and_returns_request() -> None:
-    svc, db, req_repo, event_repo, service_repo = _make_svc()
+    svc, db, _, req_repo, event_repo, service_repo = _make_svc()
     service_repo.get_by_id.return_value = MagicMock()
     req_repo.exists_for_tuple.return_value = False
     created_req = _make_request()
@@ -186,7 +187,7 @@ def test_create_request_commits_and_returns_request() -> None:
 
 
 def test_create_request_uses_api_actor_when_no_requested_by() -> None:
-    svc, db, req_repo, event_repo, service_repo = _make_svc()
+    svc, db, _, req_repo, event_repo, service_repo = _make_svc()
     service_repo.get_by_id.return_value = MagicMock()
     req_repo.exists_for_tuple.return_value = False
     created_req = _make_request()
@@ -201,7 +202,7 @@ def test_create_request_uses_api_actor_when_no_requested_by() -> None:
 
 
 def test_create_request_raises_not_found_when_service_missing() -> None:
-    svc, _, _, _, service_repo = _make_svc()
+    svc, _, _, _, _, service_repo = _make_svc()
     service_repo.get_by_id.return_value = None
 
     body = SecretRequestBody(logical_name="key", environment="dev", generate_value=True)
@@ -212,7 +213,7 @@ def test_create_request_raises_not_found_when_service_missing() -> None:
 
 
 def test_create_request_raises_validation_error_when_generate_value_false() -> None:
-    svc, _, _, _, service_repo = _make_svc()
+    svc, _, _, _, _, service_repo = _make_svc()
     service_repo.get_by_id.return_value = MagicMock()
 
     body = SecretRequestBody(logical_name="key", environment="dev", generate_value=False)
@@ -223,7 +224,7 @@ def test_create_request_raises_validation_error_when_generate_value_false() -> N
 
 
 def test_create_request_raises_conflict_when_tuple_exists() -> None:
-    svc, _, req_repo, _, service_repo = _make_svc()
+    svc, _, _, req_repo, _, service_repo = _make_svc()
     service_repo.get_by_id.return_value = MagicMock()
     req_repo.exists_for_tuple.return_value = True
 
@@ -239,14 +240,14 @@ def test_create_request_raises_conflict_when_tuple_exists() -> None:
 
 def test_get_request_returns_request() -> None:
     req = _make_request()
-    svc, _, req_repo, _, _ = _make_svc()
+    svc, _, _, req_repo, _, _ = _make_svc()
     req_repo.get_by_id.return_value = req
 
     assert svc.get_request(req.id) is req
 
 
 def test_get_request_raises_not_found() -> None:
-    svc, _, req_repo, _, _ = _make_svc()
+    svc, _, _, req_repo, _, _ = _make_svc()
     req_repo.get_by_id.return_value = None
 
     with pytest.raises(NotFoundError) as exc_info:
@@ -260,7 +261,7 @@ def test_get_request_raises_not_found() -> None:
 
 def test_get_events_returns_event_list() -> None:
     req = _make_request()
-    svc, _, req_repo, event_repo, _ = _make_svc()
+    svc, _, _, req_repo, event_repo, _ = _make_svc()
     req_repo.get_by_id.return_value = req
     events = [MagicMock(), MagicMock()]
     event_repo.list_for_request.return_value = events
@@ -269,7 +270,7 @@ def test_get_events_returns_event_list() -> None:
 
 
 def test_get_events_raises_not_found_when_request_missing() -> None:
-    svc, _, req_repo, _, _ = _make_svc()
+    svc, _, _, req_repo, _, _ = _make_svc()
     req_repo.get_by_id.return_value = None
 
     with pytest.raises(NotFoundError):
@@ -280,16 +281,16 @@ def test_get_events_raises_not_found_when_request_missing() -> None:
 
 
 def test_approve_request_provisioned_commits_twice_and_returns_result() -> None:
-    svc, db, req_repo, _, service_repo = _make_svc()
+    svc, db, mock_sm, req_repo, _, service_repo = _make_svc()
     req = _make_request("PENDING")
     req_repo.get_for_update.return_value = req
     mock_service = MagicMock()
     mock_service.name = "my-svc"
     service_repo.get_by_id.return_value = mock_service
     fake_arn = "arn:aws:secretsmanager:us-east-1:123:secret:platform/my-svc/dev/db-pass"
+    mock_sm.create_app_secret.return_value = fake_arn
 
-    with patch(f"{_SVC_MODULE}.secrets_manager_svc.create_app_secret", return_value=fake_arn):
-        result = svc.approve_request(req.id, approver_email="ops@co.com")
+    result = svc.approve_request(req.id, approver_email="ops@co.com")
 
     assert isinstance(result, ApproveResult)
     assert result.from_status == "PENDING"
@@ -299,7 +300,7 @@ def test_approve_request_provisioned_commits_twice_and_returns_result() -> None:
 
 
 def test_approve_request_not_found_raises() -> None:
-    svc, _, req_repo, _, _ = _make_svc()
+    svc, _, _, req_repo, _, _ = _make_svc()
     req_repo.get_for_update.return_value = None
 
     with pytest.raises(NotFoundError) as exc_info:
@@ -309,18 +310,15 @@ def test_approve_request_not_found_raises() -> None:
 
 
 def test_approve_request_aws_failure_records_failed_status() -> None:
-    svc, db, req_repo, _, service_repo = _make_svc()
+    svc, db, mock_sm, req_repo, _, service_repo = _make_svc()
     req = _make_request("PENDING")
     req_repo.get_for_update.return_value = req
     mock_service = MagicMock()
     mock_service.name = "my-svc"
     service_repo.get_by_id.return_value = mock_service
+    mock_sm.create_app_secret.side_effect = RuntimeError("connection refused")
 
-    with patch(
-        f"{_SVC_MODULE}.secrets_manager_svc.create_app_secret",
-        side_effect=RuntimeError("connection refused"),
-    ):
-        result = svc.approve_request(req.id, approver_email="ops@co.com")
+    result = svc.approve_request(req.id, approver_email="ops@co.com")
 
     assert result.request.status == "FAILED"
     assert db.commit.call_count == 2

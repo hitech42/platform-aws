@@ -181,7 +181,7 @@ PENDING → APPROVED → PROVISIONING → PROVISIONED
 
 `GET /api/v1/secret-requests/{id}/summary` returns two independent sections:
 
-- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_checks.py` from Postgres data. The LLM never determines facts.
+- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_check_service.py` from Postgres data. The LLM never determines facts.
 - **`narrative`** — generated text from the active LLM provider. May be `null` if the provider fails. Its absence must never prevent callers from reading `facts`.
 
 ### Design rule (ADR-017)

@@ -12,6 +12,7 @@ from app.src.repositories.request_event_repository import RequestEventRepository
 from app.src.repositories.secret_request_repository import SecretRequestRepository
 from app.src.repositories.service_repository import ServiceRepository
 from app.src.services.narrative_service import NarrativeService
+from app.src.services.risk_check_service import RiskCheckService
 
 _SVC_MODULE = "app.src.services.narrative_service"
 
@@ -64,18 +65,22 @@ def _clean_risk_flags(
     }
 
 
-def _make_narrative_svc() -> tuple[NarrativeService, MagicMock, MagicMock, MagicMock, MagicMock]:
+def _make_narrative_svc() -> tuple[
+    NarrativeService, MagicMock, MagicMock, MagicMock, MagicMock, MagicMock
+]:
+    risk_check_svc = MagicMock(spec=RiskCheckService)
     secret_request_repo = MagicMock(spec=SecretRequestRepository)
     request_event_repo = MagicMock(spec=RequestEventRepository)
     service_repo = MagicMock(spec=ServiceRepository)
     config_repo = MagicMock(spec=ConfigRepository)
     svc = NarrativeService(
+        risk_check_svc=risk_check_svc,
         secret_request_repo=secret_request_repo,
         request_event_repo=request_event_repo,
         service_repo=service_repo,
         config_repo=config_repo,
     )
-    return svc, secret_request_repo, request_event_repo, service_repo, config_repo
+    return svc, risk_check_svc, secret_request_repo, request_event_repo, service_repo, config_repo
 
 
 # ── _build_prompt ─────────────────────────────────────────────────────────────
@@ -147,7 +152,7 @@ def test_prompt_contains_timeline_entries() -> None:
 
 
 def test_generate_summary_raises_not_found_when_request_missing() -> None:
-    svc, req_repo, _, _, _ = _make_narrative_svc()
+    svc, _, req_repo, _, _, _ = _make_narrative_svc()
     req_repo.get_by_id.return_value = None
 
     with pytest.raises(NotFoundError) as exc_info:
@@ -157,7 +162,7 @@ def test_generate_summary_raises_not_found_when_request_missing() -> None:
 
 
 def test_generate_summary_returns_facts_and_narrative() -> None:
-    svc, req_repo, event_repo, service_repo, _ = _make_narrative_svc()
+    svc, risk_check_svc, req_repo, event_repo, service_repo, _ = _make_narrative_svc()
     req = _make_request(environment="dev")
     service = _make_service_model()
     service.owner_email = "alice@co.com"
@@ -166,6 +171,7 @@ def test_generate_summary_returns_facts_and_narrative() -> None:
     req_repo.get_by_id.return_value = req
     service_repo.get_by_id.return_value = service
     event_repo.list_for_request.return_value = events
+    risk_check_svc.compute_risk_flags.return_value = _clean_risk_flags()
 
     mock_provider = MagicMock()
     mock_provider.generate_narrative.return_value = "All good."
@@ -178,7 +184,7 @@ def test_generate_summary_returns_facts_and_narrative() -> None:
 
 
 def test_generate_summary_sets_narrative_null_on_provider_error() -> None:
-    svc, req_repo, event_repo, service_repo, _ = _make_narrative_svc()
+    svc, risk_check_svc, req_repo, event_repo, service_repo, _ = _make_narrative_svc()
     req = _make_request()
     service = _make_service_model()
     service.owner_email = "owner@co.com"
@@ -186,6 +192,7 @@ def test_generate_summary_sets_narrative_null_on_provider_error() -> None:
     req_repo.get_by_id.return_value = req
     service_repo.get_by_id.return_value = service
     event_repo.list_for_request.return_value = [_make_event("PENDING", "owner@co.com")]
+    risk_check_svc.compute_risk_flags.return_value = _clean_risk_flags()
 
     failing_provider = MagicMock()
     failing_provider.generate_narrative.side_effect = NarrativeError("Bedrock unavailable")

@@ -99,7 +99,7 @@ Use the **synchronous** SQLAlchemy engine (`create_engine`) and session (`Sessio
 2. Replace `create_engine` / `sessionmaker` / `Session` with `create_async_engine` / `async_sessionmaker` / `AsyncSession` in `db/session.py`.
 3. Change `get_db` to an `async` generator yielding `AsyncSession`.
 4. Add `await` to all DB execute calls in the service layer.
-5. Swap `boto3` → `aioboto3` in `services/secrets_manager.py`.
+5. Swap `boto3` → `aioboto3` in `services/secrets_manager_service.py`.
 6. Change route handlers to `async def`.
 
 The service layer and route structure do not change shape — only the DB and AWS call mechanics change.

@@ -1,99 +1,96 @@
 """Unit tests for deterministic risk checks.
 
-Pure functions — no mocks, no I/O, no DB, no AWS.
+Pure static methods — no mocks, no I/O, no DB, no AWS.
 """
 
 from unittest.mock import MagicMock
 
-from app.src.services.risk_checks import (
-    check_naming_convention,
-    check_ownership_mismatch,
-    check_production_risk,
-    compute_risk_flags,
-)
+from app.src.services.risk_check_service import RiskCheckService
 
 # ── check_ownership_mismatch ──────────────────────────────────────────────────
 
 
 def test_ownership_match_same_case() -> None:
-    assert check_ownership_mismatch("alice@example.com", "alice@example.com") is False
+    result = RiskCheckService.check_ownership_mismatch("alice@example.com", "alice@example.com")
+    assert result is False
 
 
 def test_ownership_match_case_insensitive() -> None:
-    assert check_ownership_mismatch("Alice@Example.com", "alice@example.com") is False
+    result = RiskCheckService.check_ownership_mismatch("Alice@Example.com", "alice@example.com")
+    assert result is False
 
 
 def test_ownership_mismatch_different_user() -> None:
-    assert check_ownership_mismatch("bob@example.com", "alice@example.com") is True
+    assert RiskCheckService.check_ownership_mismatch("bob@example.com", "alice@example.com") is True
 
 
 def test_ownership_mismatch_unknown_lowercase() -> None:
-    assert check_ownership_mismatch("unknown", "alice@example.com") is True
+    assert RiskCheckService.check_ownership_mismatch("unknown", "alice@example.com") is True
 
 
 def test_ownership_mismatch_unknown_mixed_case() -> None:
     # "Unknown", "UNKNOWN" etc. must all be flagged
-    assert check_ownership_mismatch("Unknown", "alice@example.com") is True
-    assert check_ownership_mismatch("UNKNOWN", "alice@example.com") is True
+    assert RiskCheckService.check_ownership_mismatch("Unknown", "alice@example.com") is True
+    assert RiskCheckService.check_ownership_mismatch("UNKNOWN", "alice@example.com") is True
 
 
 def test_ownership_mismatch_unknown_even_if_owner_is_also_unknown() -> None:
     # "unknown" is unconditionally a mismatch regardless of owner_email value
-    assert check_ownership_mismatch("unknown", "unknown") is True
+    assert RiskCheckService.check_ownership_mismatch("unknown", "unknown") is True
 
 
 # ── check_naming_convention ───────────────────────────────────────────────────
 
 
 def test_naming_valid() -> None:
-    assert check_naming_convention("db-password", "dev") == []
+    assert RiskCheckService.check_naming_convention("db-password", "dev") == []
 
 
 def test_naming_valid_single_word() -> None:
-    assert check_naming_convention("apikey", "staging") == []
+    assert RiskCheckService.check_naming_convention("apikey", "staging") == []
 
 
 def test_naming_valid_with_numbers() -> None:
-    assert check_naming_convention("oauth2-token", "prod") == []
+    assert RiskCheckService.check_naming_convention("oauth2-token", "prod") == []
 
 
 def test_naming_uppercase_violation() -> None:
-    violations = check_naming_convention("DB-Password", "dev")
+    violations = RiskCheckService.check_naming_convention("DB-Password", "dev")
     assert len(violations) == 1
     assert "lowercase" in violations[0]
 
 
 def test_naming_starts_with_number_violation() -> None:
-    violations = check_naming_convention("1secret", "dev")
+    violations = RiskCheckService.check_naming_convention("1secret", "dev")
     assert len(violations) == 1
     assert "lowercase" in violations[0]
 
 
 def test_naming_underscore_violation() -> None:
-    violations = check_naming_convention("db_password", "dev")
+    violations = RiskCheckService.check_naming_convention("db_password", "dev")
     assert len(violations) == 1
     assert "lowercase" in violations[0]
 
 
 def test_naming_embeds_environment_violation() -> None:
-    violations = check_naming_convention("db-password-prod", "prod")
+    violations = RiskCheckService.check_naming_convention("db-password-prod", "prod")
     assert len(violations) == 1
     assert "environment" in violations[0]
 
 
 def test_naming_both_violations() -> None:
     # "Dev-secret-dev": uppercase start → regex violation; contains "dev" → env violation
-    violations = check_naming_convention("Dev-secret-dev", "dev")
+    violations = RiskCheckService.check_naming_convention("Dev-secret-dev", "dev")
     assert len(violations) == 2
 
 
 def test_naming_environment_not_flagged_when_absent() -> None:
-    assert check_naming_convention("db-password", "prod") == []
+    assert RiskCheckService.check_naming_convention("db-password", "prod") == []
 
 
 def test_naming_environment_check_is_substring() -> None:
     # "staging" inside "staging-token" should be flagged
-    violations = check_naming_convention("staging-token", "staging")
+    violations = RiskCheckService.check_naming_convention("staging-token", "staging")
     assert any("environment" in v for v in violations)
 
 
@@ -101,15 +98,15 @@ def test_naming_environment_check_is_substring() -> None:
 
 
 def test_production_risk_prod() -> None:
-    assert check_production_risk("prod") is True
+    assert RiskCheckService.check_production_risk("prod") is True
 
 
 def test_production_risk_dev() -> None:
-    assert check_production_risk("dev") is False
+    assert RiskCheckService.check_production_risk("dev") is False
 
 
 def test_production_risk_staging() -> None:
-    assert check_production_risk("staging") is False
+    assert RiskCheckService.check_production_risk("staging") is False
 
 
 # ── compute_risk_flags ────────────────────────────────────────────────────────
@@ -129,7 +126,7 @@ def _make_service(owner_email: str = "alice@example.com") -> MagicMock:
 
 
 def test_compute_no_flags() -> None:
-    flags = compute_risk_flags(
+    flags = RiskCheckService.compute_risk_flags(
         _make_request("db-password", "dev"),
         _make_service("alice@example.com"),
         requested_by="alice@example.com",
@@ -141,7 +138,7 @@ def test_compute_no_flags() -> None:
 
 
 def test_compute_ownership_mismatch_sets_has_any_flag() -> None:
-    flags = compute_risk_flags(
+    flags = RiskCheckService.compute_risk_flags(
         _make_request("db-password", "dev"),
         _make_service("alice@example.com"),
         requested_by="bob@example.com",
@@ -151,7 +148,7 @@ def test_compute_ownership_mismatch_sets_has_any_flag() -> None:
 
 
 def test_compute_naming_violation_sets_has_any_flag() -> None:
-    flags = compute_risk_flags(
+    flags = RiskCheckService.compute_risk_flags(
         _make_request("DB_Password", "dev"),
         _make_service("alice@example.com"),
         requested_by="alice@example.com",
@@ -161,7 +158,7 @@ def test_compute_naming_violation_sets_has_any_flag() -> None:
 
 
 def test_compute_production_sets_has_any_flag() -> None:
-    flags = compute_risk_flags(
+    flags = RiskCheckService.compute_risk_flags(
         _make_request("db-password", "prod"),
         _make_service("alice@example.com"),
         requested_by="alice@example.com",
@@ -171,7 +168,7 @@ def test_compute_production_sets_has_any_flag() -> None:
 
 
 def test_compute_unknown_requester_triggers_mismatch() -> None:
-    flags = compute_risk_flags(
+    flags = RiskCheckService.compute_risk_flags(
         _make_request(),
         _make_service("alice@example.com"),
         requested_by="unknown",
@@ -181,7 +178,7 @@ def test_compute_unknown_requester_triggers_mismatch() -> None:
 
 
 def test_compute_all_flags() -> None:
-    flags = compute_risk_flags(
+    flags = RiskCheckService.compute_risk_flags(
         _make_request("DB_Password_Prod", "prod"),
         _make_service("alice@example.com"),
         requested_by="unknown",

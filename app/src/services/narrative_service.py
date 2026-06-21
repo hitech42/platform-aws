@@ -1,12 +1,6 @@
-"""Narrative service: orchestrates risk checks + LLM narrative for the summary endpoint.
-
-build_prompt() lives here (moved from services/bedrock.py, which is deleted in
-Stage 3).  Until Stage 3, bedrock.py keeps its own copy so the route's import is
-unbroken; the two copies are identical.
-"""
+"""Narrative service: orchestrates risk checks + LLM narrative for the summary endpoint."""
 
 import uuid
-from typing import Any
 
 import structlog
 
@@ -25,7 +19,7 @@ from app.src.schemas.secret_request import (
     SecretRequestSummaryRead,
 )
 from app.src.services.llm_provider import BedrockNarrativeProvider, get_active_provider
-from app.src.services.risk_checks import compute_risk_flags
+from app.src.services.risk_check_service import RiskCheckService, RiskFlags
 
 log = structlog.get_logger(__name__)
 
@@ -33,11 +27,13 @@ log = structlog.get_logger(__name__)
 class NarrativeService:
     def __init__(
         self,
+        risk_check_svc: RiskCheckService,
         secret_request_repo: SecretRequestRepository,
         request_event_repo: RequestEventRepository,
         service_repo: ServiceRepository,
         config_repo: ConfigRepository,
     ) -> None:
+        self._risk_check_svc = risk_check_svc
         self._secret_request_repo = secret_request_repo
         self._request_event_repo = request_event_repo
         self._service_repo = service_repo
@@ -46,7 +42,7 @@ class NarrativeService:
     @staticmethod
     def _build_prompt(
         events: list[RequestEvent],
-        risk_flags: dict[str, Any],
+        risk_flags: RiskFlags,
         secret_request: SecretRequest,
         service: Service,
     ) -> str:
@@ -99,7 +95,7 @@ class NarrativeService:
             "unknown",
         )
 
-        risk_flags = compute_risk_flags(req, service, requested_by)
+        risk_flags = self._risk_check_svc.compute_risk_flags(req, service, requested_by)
 
         provider = get_active_provider(self._config_repo)
         prompt = self._build_prompt(events, risk_flags, req, service)
