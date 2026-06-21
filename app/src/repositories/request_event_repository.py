@@ -8,7 +8,7 @@ from app.src.models.request_event import RequestEvent
 
 class RequestEventRepository:
     def __init__(self, db: Session) -> None:
-        self.db = db
+        self._db = db
 
     def create(
         self,
@@ -24,14 +24,14 @@ class RequestEventRepository:
             actor=actor,
             detail=detail,
         )
-        self.db.add(event)
-        self.db.flush()
+        self._db.add(event)
+        self._db.flush()
         return event
 
     def list_for_request(self, secret_request_id: uuid.UUID) -> list[RequestEvent]:
         """Return all events for a request ordered by timestamp then seq (tiebreaker)."""
         return list(
-            self.db.execute(
+            self._db.execute(
                 select(RequestEvent)
                 .where(RequestEvent.secret_request_id == secret_request_id)
                 .order_by(RequestEvent.timestamp.asc(), RequestEvent.seq.asc())

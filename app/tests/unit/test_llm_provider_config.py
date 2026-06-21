@@ -25,79 +25,77 @@ def reset_cache() -> Generator[None, None, None]:
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _db_with_value(value: str) -> MagicMock:
-    row = MagicMock()
-    row.value = value
-    db = MagicMock()
-    db.get.return_value = row
-    return db
+def _repo_with_value(value: str) -> MagicMock:
+    repo = MagicMock()
+    repo.get_value.return_value = value
+    return repo
 
 
-def _db_no_row() -> MagicMock:
-    db = MagicMock()
-    db.get.return_value = None
-    return db
+def _repo_no_row() -> MagicMock:
+    repo = MagicMock()
+    repo.get_value.return_value = None
+    return repo
 
 
-def _db_error() -> MagicMock:
-    db = MagicMock()
-    db.get.side_effect = RuntimeError("connection refused")
-    return db
+def _repo_error() -> MagicMock:
+    repo = MagicMock()
+    repo.get_value.side_effect = RuntimeError("connection refused")
+    return repo
 
 
 # ── cache behaviour ───────────────────────────────────────────────────────────
 
 
 def test_cache_miss_queries_db() -> None:
-    db = _db_with_value("bedrock")
-    result = llm_provider_config.get(db)
+    repo = _repo_with_value("bedrock")
+    result = llm_provider_config.get(repo)
     assert result == "bedrock"
-    db.get.assert_called_once()
+    repo.get_value.assert_called_once()
 
 
 def test_cache_hit_within_ttl_does_not_query_db() -> None:
-    db = _db_with_value("bedrock")
-    llm_provider_config.get(db)
-    db.get.reset_mock()
+    repo = _repo_with_value("bedrock")
+    llm_provider_config.get(repo)
+    repo.get_value.reset_mock()
 
-    llm_provider_config.get(db)
+    llm_provider_config.get(repo)
 
-    db.get.assert_not_called()
+    repo.get_value.assert_not_called()
 
 
 def test_cache_hit_returns_previously_fetched_value() -> None:
-    llm_provider_config.get(_db_with_value("bedrock"))
-    # Second call uses a different db mock; if cache is working, this mock is never hit
-    result = llm_provider_config.get(_db_with_value("anthropic_api"))
+    llm_provider_config.get(_repo_with_value("bedrock"))
+    # Second call uses a different repo mock; if cache is working, this mock is never hit
+    result = llm_provider_config.get(_repo_with_value("anthropic_api"))
     assert result == "bedrock"
 
 
 def test_expired_cache_re_queries_db() -> None:
-    db = _db_with_value("bedrock")
-    llm_provider_config.get(db)
-    db.get.reset_mock()
+    repo = _repo_with_value("bedrock")
+    llm_provider_config.get(repo)
+    repo.get_value.reset_mock()
 
     llm_provider_config._cached_at = time.monotonic() - CACHE_TTL_SECONDS - 1
 
-    llm_provider_config.get(db)
+    llm_provider_config.get(repo)
 
-    db.get.assert_called_once()
+    repo.get_value.assert_called_once()
 
 
 # ── validation ────────────────────────────────────────────────────────────────
 
 
 def test_valid_bedrock_returned() -> None:
-    assert llm_provider_config.get(_db_with_value("bedrock")) == "bedrock"
+    assert llm_provider_config.get(_repo_with_value("bedrock")) == "bedrock"
 
 
 def test_valid_anthropic_api_returned() -> None:
-    assert llm_provider_config.get(_db_with_value("anthropic_api")) == "anthropic_api"
+    assert llm_provider_config.get(_repo_with_value("anthropic_api")) == "anthropic_api"
 
 
 def test_invalid_db_value_falls_back_to_default() -> None:
     with structlog.testing.capture_logs() as logs:
-        result = llm_provider_config.get(_db_with_value("openai"))
+        result = llm_provider_config.get(_repo_with_value("openai"))
 
     assert result == "anthropic_api"
     assert any(
@@ -107,14 +105,14 @@ def test_invalid_db_value_falls_back_to_default() -> None:
 
 def test_invalid_db_value_logs_the_bad_value() -> None:
     with structlog.testing.capture_logs() as logs:
-        llm_provider_config.get(_db_with_value("typo_value"))
+        llm_provider_config.get(_repo_with_value("typo_value"))
 
     warning = next(e for e in logs if "invalid_value" in e.get("event", ""))
     assert warning["value"] == "typo_value"
 
 
 def test_missing_row_returns_default() -> None:
-    result = llm_provider_config.get(_db_no_row())
+    result = llm_provider_config.get(_repo_no_row())
     assert result == "anthropic_api"
 
 
@@ -122,11 +120,11 @@ def test_missing_row_returns_default() -> None:
 
 
 def test_db_failure_with_stale_cache_returns_stale_value() -> None:
-    llm_provider_config.get(_db_with_value("bedrock"))
+    llm_provider_config.get(_repo_with_value("bedrock"))
     llm_provider_config._cached_at = time.monotonic() - CACHE_TTL_SECONDS - 1
 
     with structlog.testing.capture_logs() as logs:
-        result = llm_provider_config.get(_db_error())
+        result = llm_provider_config.get(_repo_error())
 
     assert result == "bedrock"
     assert any("db_error" in e.get("event", "") for e in logs)
@@ -134,7 +132,7 @@ def test_db_failure_with_stale_cache_returns_stale_value() -> None:
 
 def test_db_failure_with_no_cache_returns_default() -> None:
     with structlog.testing.capture_logs() as logs:
-        result = llm_provider_config.get(_db_error())
+        result = llm_provider_config.get(_repo_error())
 
     assert result == "anthropic_api"
     assert any("db_error" in e.get("event", "") for e in logs)
@@ -142,7 +140,7 @@ def test_db_failure_with_no_cache_returns_default() -> None:
 
 def test_db_failure_logs_the_exception_message() -> None:
     with structlog.testing.capture_logs() as logs:
-        llm_provider_config.get(_db_error())
+        llm_provider_config.get(_repo_error())
 
     warning = next(e for e in logs if "db_error" in e.get("event", ""))
     assert "connection refused" in warning["error"]

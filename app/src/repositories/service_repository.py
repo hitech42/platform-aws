@@ -9,24 +9,24 @@ from app.src.schemas.service import ServiceCreate
 
 class ServiceRepository:
     def __init__(self, db: Session) -> None:
-        self.db = db
+        self._db = db
 
     def create(self, data: ServiceCreate) -> Service:
         service = Service(**data.model_dump())
-        self.db.add(service)
-        self.db.flush()
+        self._db.add(service)
+        self._db.flush()
         return service
 
     def get_by_id(self, id: uuid.UUID) -> Service | None:
-        return self.db.execute(select(Service).where(Service.id == id)).scalar_one_or_none()
+        return self._db.execute(select(Service).where(Service.id == id)).scalar_one_or_none()
 
     def get_by_name(self, name: str) -> Service | None:
-        return self.db.execute(select(Service).where(Service.name == name)).scalar_one_or_none()
+        return self._db.execute(select(Service).where(Service.name == name)).scalar_one_or_none()
 
     def list(self, page: int, page_size: int) -> tuple[list[Service], int]:
-        total: int = self.db.execute(select(func.count()).select_from(Service)).scalar_one()
+        total: int = self._db.execute(select(func.count()).select_from(Service)).scalar_one()
         rows = (
-            self.db.execute(
+            self._db.execute(
                 select(Service)
                 .order_by(Service.created_at.asc(), Service.id.asc())
                 .offset((page - 1) * page_size)

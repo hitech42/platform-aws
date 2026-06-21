@@ -12,9 +12,8 @@ Failure precedence when the DB is unreachable:
 import time
 
 import structlog
-from sqlalchemy.orm import Session
 
-from app.src.models.config import Config
+from app.src.repositories.config_repository import ConfigRepository
 
 log = structlog.get_logger(__name__)
 
@@ -57,17 +56,14 @@ class LLMProviderConfig:
         )
         return self._DEFAULT_PROVIDER
 
-    def get(self, db: Session) -> str:
-        """Return the active LLM provider name, using the cache when TTL has not expired.
-
-        Uses ``db.get()`` for a direct primary-key lookup — no full table scan.
-        """
+    def get(self, config_repo: ConfigRepository) -> str:
+        """Return the active LLM provider name, using the cache when TTL has not expired."""
         if self._is_fresh():
             return self._cached_value  # type: ignore[return-value]  # fresh → never None
 
         try:
-            row = db.get(Config, "llm_provider")
-            raw = row.value if row else self._DEFAULT_PROVIDER
+            value = config_repo.get_value("llm_provider")
+            raw = value if value is not None else self._DEFAULT_PROVIDER
             validated = self._validate(raw)
             self._cached_value = validated
             self._cached_at = time.monotonic()
