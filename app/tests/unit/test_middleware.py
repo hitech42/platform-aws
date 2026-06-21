@@ -149,7 +149,7 @@ def test_provisioning_outcome_provisioned_event_shape() -> None:
     from app.src.repositories.service_repository import ServiceRepository
     from app.src.services.dependencies import get_secret_request_lifecycle_service
     from app.src.services.secret_request_lifecycle_service import SecretRequestLifecycleService
-    from app.src.services.secrets_manager_service import SecretsManager
+    from app.src.services.secrets_manager_service import SecretsManagerService
 
     svc_id = uuid.uuid4()
     req_id = uuid.uuid4()
@@ -175,14 +175,14 @@ def test_provisioning_outcome_provisioned_event_shape() -> None:
     mock_secret_request_repo = MagicMock(spec=SecretRequestRepository)
     mock_request_event_repo = MagicMock(spec=RequestEventRepository)
     mock_service_repo = MagicMock(spec=ServiceRepository)
-    mock_secrets_manager = MagicMock(spec=SecretsManager)
+    mock_secrets_manager_service = MagicMock(spec=SecretsManagerService)
     mock_secret_request_repo.get_for_update.return_value = mock_req
     mock_service_repo.get_by_id.return_value = mock_svc
-    mock_secrets_manager.create_app_secret.return_value = fake_arn
+    mock_secrets_manager_service.create_app_secret.return_value = fake_arn
 
     svc = SecretRequestLifecycleService(
         db=MagicMock(),
-        secrets_manager=mock_secrets_manager,
+        secrets_manager_service=mock_secrets_manager_service,
         secret_request_repo=mock_secret_request_repo,
         request_event_repo=mock_request_event_repo,
         service_repo=mock_service_repo,
@@ -213,7 +213,7 @@ def test_provisioning_outcome_failed_event_shape() -> None:
     from app.src.repositories.service_repository import ServiceRepository
     from app.src.services.dependencies import get_secret_request_lifecycle_service
     from app.src.services.secret_request_lifecycle_service import SecretRequestLifecycleService
-    from app.src.services.secrets_manager_service import SecretsManager
+    from app.src.services.secrets_manager_service import SecretsManagerService
 
     svc_id = uuid.uuid4()
     req_id = uuid.uuid4()
@@ -237,14 +237,14 @@ def test_provisioning_outcome_failed_event_shape() -> None:
     mock_secret_request_repo = MagicMock(spec=SecretRequestRepository)
     mock_request_event_repo = MagicMock(spec=RequestEventRepository)
     mock_service_repo = MagicMock(spec=ServiceRepository)
-    mock_secrets_manager = MagicMock(spec=SecretsManager)
+    mock_secrets_manager_service = MagicMock(spec=SecretsManagerService)
     mock_secret_request_repo.get_for_update.return_value = mock_req
     mock_service_repo.get_by_id.return_value = mock_svc
-    mock_secrets_manager.create_app_secret.side_effect = RuntimeError("boom")
+    mock_secrets_manager_service.create_app_secret.side_effect = RuntimeError("boom")
 
     svc = SecretRequestLifecycleService(
         db=MagicMock(),
-        secrets_manager=mock_secrets_manager,
+        secrets_manager_service=mock_secrets_manager_service,
         secret_request_repo=mock_secret_request_repo,
         request_event_repo=mock_request_event_repo,
         service_repo=mock_service_repo,

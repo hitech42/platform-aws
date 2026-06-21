@@ -15,7 +15,7 @@ from app.src.services.secret_request_lifecycle_service import (
     ApproveResult,
     SecretRequestLifecycleService,
 )
-from app.src.services.secrets_manager_service import SecretsManager
+from app.src.services.secrets_manager_service import SecretsManagerService
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -39,19 +39,26 @@ def _make_svc() -> tuple[
     MagicMock,
     MagicMock,
 ]:
-    mock_secrets_manager = MagicMock(spec=SecretsManager)
+    mock_secrets_manager_service = MagicMock(spec=SecretsManagerService)
     secret_request_repo = MagicMock(spec=SecretRequestRepository)
     request_event_repo = MagicMock(spec=RequestEventRepository)
     service_repo = MagicMock(spec=ServiceRepository)
     db = MagicMock()
     svc = SecretRequestLifecycleService(
         db=db,
-        secrets_manager=mock_secrets_manager,
+        secrets_manager_service=mock_secrets_manager_service,
         secret_request_repo=secret_request_repo,
         request_event_repo=request_event_repo,
         service_repo=service_repo,
     )
-    return svc, db, mock_secrets_manager, secret_request_repo, request_event_repo, service_repo
+    return (
+        svc,
+        db,
+        mock_secrets_manager_service,
+        secret_request_repo,
+        request_event_repo,
+        service_repo,
+    )
 
 
 # ── _VALID_TRANSITIONS map completeness ───────────────────────────────────────

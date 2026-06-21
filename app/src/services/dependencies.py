@@ -20,7 +20,7 @@ from app.src.repositories.service_repository import ServiceRepository
 from app.src.services.narrative_service import NarrativeService
 from app.src.services.risk_check_service import RiskCheckService
 from app.src.services.secret_request_lifecycle_service import SecretRequestLifecycleService
-from app.src.services.secrets_manager_service import SecretsManager
+from app.src.services.secrets_manager_service import SecretsManagerService
 from app.src.services.service_catalog_service import ServiceCatalogService
 
 # ── Repository providers ──────────────────────────────────────────────────────
@@ -57,8 +57,8 @@ def get_risk_check_service() -> RiskCheckService:
     return RiskCheckService()
 
 
-def get_secrets_manager() -> SecretsManager:
-    return SecretsManager()
+def get_secrets_manager_service() -> SecretsManagerService:
+    return SecretsManagerService()
 
 
 # ── Service providers ─────────────────────────────────────────────────────────
@@ -73,14 +73,14 @@ def get_service_catalog_service(
 
 def get_secret_request_lifecycle_service(
     db: Session = Depends(get_db),
-    secrets_manager: SecretsManager = Depends(get_secrets_manager),
+    secrets_manager: SecretsManagerService = Depends(get_secrets_manager_service),
     secret_request_repo: SecretRequestRepository = Depends(get_secret_request_repository),
     request_event_repo: RequestEventRepository = Depends(get_request_event_repository),
     service_repo: ServiceRepository = Depends(get_service_repository),
 ) -> SecretRequestLifecycleService:
     return SecretRequestLifecycleService(
         db=db,
-        secrets_manager=secrets_manager,
+        secrets_manager_service=secrets_manager,
         secret_request_repo=secret_request_repo,
         request_event_repo=request_event_repo,
         service_repo=service_repo,

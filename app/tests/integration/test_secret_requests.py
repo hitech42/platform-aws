@@ -173,7 +173,7 @@ def test_approve_transitions_to_provisioned(client: TestClient) -> None:
     req = _create_request(client, svc["id"])
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         return_value=_FAKE_ARN,
     ):
         r = client.post(
@@ -192,7 +192,7 @@ def test_approve_writes_full_event_trail(client: TestClient) -> None:
     req = _create_request(client, svc["id"])
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         return_value=_FAKE_ARN,
     ):
         client.post(
@@ -214,7 +214,7 @@ def test_approve_records_failed_when_secrets_manager_raises(client: TestClient) 
     req = _create_request(client, svc["id"])
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         side_effect=RuntimeError("AccessDenied"),
     ):
         r = client.post(
@@ -282,7 +282,7 @@ def test_list_events_ordering_preserved_for_same_second_events(
     req = _create_request(client, svc["id"])
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         return_value=_FAKE_ARN,
     ):
         client.post(
@@ -307,7 +307,7 @@ def test_approve_failed_detail_is_truncated_and_contains_no_traceback(
     long_message = "X" * 5000
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         side_effect=RuntimeError(long_message),
     ):
         r = client.post(
@@ -346,7 +346,7 @@ def test_approve_concurrent_calls_second_gets_409(client: TestClient) -> None:
             results.append(r.status_code)
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         return_value=_FAKE_ARN,
     ):
         t1 = threading.Thread(target=approve)
@@ -364,7 +364,7 @@ def test_approve_non_pending_request_returns_409(client: TestClient) -> None:
     req = _create_request(client, svc["id"])
 
     with patch(
-        "app.src.services.secrets_manager_service.SecretsManager.create_app_secret",
+        "app.src.services.secrets_manager_service.SecretsManagerService.create_app_secret",
         return_value=_FAKE_ARN,
     ):
         client.post(

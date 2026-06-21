@@ -19,7 +19,7 @@ from app.src.core.exceptions import ConflictError, ValidationError
 log = structlog.get_logger(__name__)
 
 
-class SecretsManager:
+class SecretsManagerService:
     def _client(self) -> Any:
         kwargs: dict[str, Any] = {"region_name": settings.aws_default_region}
         if settings.aws_endpoint_url:

@@ -25,7 +25,7 @@ from app.src.repositories.request_event_repository import RequestEventRepository
 from app.src.repositories.secret_request_repository import SecretRequestRepository
 from app.src.repositories.service_repository import ServiceRepository
 from app.src.schemas.secret_request import SecretRequestBody
-from app.src.services.secrets_manager_service import SecretsManager
+from app.src.services.secrets_manager_service import SecretsManagerService
 
 log = structlog.get_logger(__name__)
 
@@ -50,13 +50,13 @@ class SecretRequestLifecycleService:
     def __init__(
         self,
         db: Session,
-        secrets_manager: SecretsManager,
+        secrets_manager_service: SecretsManagerService,
         secret_request_repo: SecretRequestRepository,
         request_event_repo: RequestEventRepository,
         service_repo: ServiceRepository,
     ) -> None:
         self._db = db
-        self._secrets_manager = secrets_manager
+        self._secrets_manager_service = secrets_manager_service
         self._secret_request_repo = secret_request_repo
         self._request_event_repo = request_event_repo
         self._service_repo = service_repo
@@ -141,7 +141,7 @@ class SecretRequestLifecycleService:
         assert service is not None
 
         try:
-            arn = self._secrets_manager.create_app_secret(
+            arn = self._secrets_manager_service.create_app_secret(
                 service_name=service.name,
                 logical_name=req.logical_name,
                 environment=req.environment,
