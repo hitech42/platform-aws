@@ -2,6 +2,32 @@
 
 An internal FastAPI service that lets dev teams self-serve platform requests — starting with requesting and managing application secrets in AWS Secrets Manager — with a full audit trail stored in Postgres. Built for deployment on ECS Fargate + RDS PostgreSQL (db.t4g.micro), with LocalStack for local AWS emulation.
 
+**Implemented**
+
+- Core Challenge: Self-service for engineering teams to request, approve, and retreieve the application secrets in AWS Secrets Manager
+  - AI-Native Development using Claude Code
+  - Terraform CI/CD with reusable modules, tests, and using SSM and Secrets Manager
+  - No wildcard policies
+  - ECS Fargate service exposed via load balancer, resides inside VPC
+  - Documented with README.md, DECISIONS.md, CLAUDE.md
+- Option 3: Show Off Dev Skills in Your App
+  - Built with Python and Postgres
+  - IAM authentication for Postgres
+  - Input validation
+  - Health check endpoints
+  - Observability metrics via CloudWatch with SNS/Email alarms: memory, CPU, storage, ALB P95 latency, ALB 5xx errors, cost, secret provisioning errors, RDS connections etc.
+- Some of Option 1: More Complex Terraform
+  - Everything is split in modules: data, ECS Service, IAM, KMS, network, observability
+- Some of Option: 2 Show Off AI Maturity
+  - A Summary endpoint that narrates risk facts
+  - Uses either AWS Bedrock or native Anthropic API depending on availability, utilizing hot-switch via DB config with no redeploy
+
+**Left several PRs open**
+
+  - Staging environment via Terraform
+  - Correction of ECS memory alarm metric in Terraform
+  - Intentionally bad code to showcase: resolve ECS task definition image placeholder via SSM Parameter Store
+
 ## Status
 
 **Core API implemented.** The full secret-request lifecycle is operational:
@@ -22,7 +48,7 @@ An internal FastAPI service that lets dev teams self-serve platform requests —
 | Docker | 24+ | For LocalStack and Postgres (both containerised) |
 | Docker Compose | v2 | Bundled with Docker Desktop |
 
-## Roadmap / Work in Progress (targeted to be ready by the technical interview date)
+## Roadmap / Work in Progress
 - Staging environment (E5)
 
 ## Setup
