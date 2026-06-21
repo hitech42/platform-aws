@@ -64,7 +64,7 @@ def test_summary_ownership_mismatch_flag_is_set(client: TestClient) -> None:
     req = _create_request(client, svc["id"], requested_by="bob@co.com")
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        "app.src.services.narrative_service.get_active_provider",
         return_value=_mock_provider(),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
@@ -91,7 +91,7 @@ def test_summary_no_flags_when_owner_requests_clean_name(client: TestClient) -> 
     )
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        "app.src.services.narrative_service.get_active_provider",
         return_value=_mock_provider(),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
@@ -116,7 +116,7 @@ def test_summary_production_flag_is_set(client: TestClient) -> None:
     )
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        "app.src.services.narrative_service.get_active_provider",
         return_value=_mock_provider(),
     ):
         r = client.get(f"/api/v1/secret-requests/{req['id']}/summary")
@@ -133,7 +133,7 @@ def test_summary_narrative_error_does_not_affect_facts(client: TestClient) -> No
     req = _create_request(client, svc["id"], requested_by="bob@co.com")
 
     with patch(
-        "app.src.api.v1.routes.secret_requests.get_active_provider",
+        "app.src.services.narrative_service.get_active_provider",
         return_value=_failing_provider(
             "AccessDeniedException: User is not authorized to invoke Bedrock"
         ),

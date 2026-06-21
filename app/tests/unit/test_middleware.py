@@ -184,8 +184,8 @@ def test_provisioning_outcome_provisioned_event_shape() -> None:
         service_repo=mock_service_repo,
     )
 
-    _SVC = "app.src.services.secret_request_lifecycle_service"
-    with patch(f"{_SVC}.secrets_manager_svc.create_app_secret", return_value=fake_arn):
+    _svc_module = "app.src.services.secret_request_lifecycle_service"
+    with patch(f"{_svc_module}.secrets_manager_svc.create_app_secret", return_value=fake_arn):
         app.dependency_overrides[get_secret_request_lifecycle_service] = lambda: svc
         try:
             with structlog.testing.capture_logs() as logs:
@@ -244,8 +244,9 @@ def test_provisioning_outcome_failed_event_shape() -> None:
         service_repo=mock_service_repo,
     )
 
-    _SVC = "app.src.services.secret_request_lifecycle_service"
-    with patch(f"{_SVC}.secrets_manager_svc.create_app_secret", side_effect=RuntimeError("boom")):
+    _svc_module = "app.src.services.secret_request_lifecycle_service"
+    _target = f"{_svc_module}.secrets_manager_svc.create_app_secret"
+    with patch(_target, side_effect=RuntimeError("boom")):
         app.dependency_overrides[get_secret_request_lifecycle_service] = lambda: svc
         try:
             with structlog.testing.capture_logs() as logs:
