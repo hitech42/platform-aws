@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.src.db.session import get_db
 from app.src.repositories.config_repository import ConfigRepository
+from app.src.repositories.health_repository import HealthRepository
 from app.src.repositories.request_event_repository import RequestEventRepository
 from app.src.repositories.secret_request_repository import SecretRequestRepository
 from app.src.repositories.service_repository import ServiceRepository
@@ -21,6 +22,10 @@ from app.src.services.secret_request_lifecycle_service import SecretRequestLifec
 from app.src.services.service_catalog_service import ServiceCatalogService
 
 # ── Repository providers ──────────────────────────────────────────────────────
+
+
+def get_health_repository(db: Session = Depends(get_db)) -> HealthRepository:
+    return HealthRepository(db)
 
 
 def get_service_repository(db: Session = Depends(get_db)) -> ServiceRepository:

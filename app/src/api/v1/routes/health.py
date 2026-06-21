@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
-from app.src.db.session import get_db
+from app.src.repositories.health_repository import HealthRepository
+from app.src.services.dependencies import get_health_repository
 
 
 class HealthResponse(BaseModel):
@@ -25,14 +24,17 @@ async def liveness() -> HealthResponse:
 
 
 @router.get("/readyz", response_model=ReadinessResponse)
-def readiness(response: Response, db: Session = Depends(get_db)) -> ReadinessResponse:
+def readiness(
+    response: Response,
+    health_repo: HealthRepository = Depends(get_health_repository),
+) -> ReadinessResponse:
     """DB-backed readiness probe. Returns 503 if Postgres is unreachable.
 
     Uses a sync def (not async) because the SQLAlchemy session is synchronous —
     FastAPI runs sync routes in a threadpool automatically.
     """
     try:
-        db.execute(text("SELECT 1"))
+        health_repo.ping()
         return ReadinessResponse(status="ok", db="ok")
     except (SQLAlchemyError, Exception):
         response.status_code = 503
