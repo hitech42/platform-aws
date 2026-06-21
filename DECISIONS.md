@@ -2,6 +2,44 @@
 
 ---
 
+## ADR-019: Layered Architecture — Routes → Services → Repositories
+
+**Date**: 2026-06-20
+**Status**: Accepted
+
+### Context
+
+The initial implementation placed all business logic, DB access, and commit control in module-level functions imported directly by route handlers (`service_catalog.py`, `secret_requests.py`, `request_lifecycle.py`, `bedrock.py`). This worked for the first feature but produced several compounding problems as the codebase grew:
+
+- Route handlers mixed HTTP concerns (request parsing, response serialisation) with DB transaction control and domain rules.
+- Mocking in unit tests required patching module-level names in the route module, so tests were tightly coupled to import paths rather than to contracts.
+- The module-level transition function held `VALID_TRANSITIONS` as a top-level constant with no natural encapsulation boundary.
+- Adding new capabilities would require repeating the same flat-function pattern, making the service layer increasingly hard to navigate.
+
+### Decision
+
+Introduce a three-layer architecture:
+
+1. **Repository layer** (`app/src/repositories/`): all SQLAlchemy access. One class per aggregate. Repositories flush but never commit; the service controls the transaction boundary.
+2. **Service layer** (`app/src/services/*_service.py`): business logic classes injected with repositories and a `Session`. Services own `commit()` and `refresh()`. Domain exceptions are raised here, never `HTTPException`.
+3. **Route layer** (`app/src/api/v1/routes/`): thin HTTP handlers. Receive service instances via `Depends()`, call one service method, return a validated schema.
+
+All `Depends()` provider functions (`get_*_repository`, `get_*_service`) live in `app/src/services/dependencies.py`. FastAPI deduplicates identical `Depends(get_db)` calls so all repositories in a single request share one `Session`.
+
+### Rationale
+
+- **Testability**: service unit tests inject mock repository instances; repository tests mock the SQLAlchemy session. Tests are decoupled from import paths and HTTP wiring.
+- **Encapsulation**: `_VALID_TRANSITIONS` and `_transition()` are private to `SecretRequestLifecycleService`, making the state machine an internal implementation detail rather than a public module-level contract.
+- **Single-responsibility routes**: handlers only parse input, call one service method, and serialise the response. No commit logic, no domain decisions.
+- **Extensibility**: adding a new capability means adding a new repository class and a new service class, not extending flat module files.
+
+### Trade-offs
+
+- More files and classes for the same amount of logic. For a single-feature service this is overhead; at two or more features it pays back through independent testability and clear ownership boundaries.
+- FastAPI's `Depends()` graph is less immediately obvious than a direct function call. The `dependencies.py` file centralises the wiring so it is always one place to look.
+
+---
+
 ## ADR-001: Local Development Strategy — Native Postgres + LocalStack + Native App Process
 
 **Date**: 2026-06-13
@@ -598,3 +636,4 @@ Credentials are unchanged from the original default (`POSTGRES_USER=app`, `POSTG
 
 - **Docker must be running to start the app**: previously, a developer could work without Docker if they only needed the API (no AWS calls). Now, Postgres also requires Docker. Acceptable — the app cannot function without a database anyway, and Docker is already listed as a prerequisite.
 - **Data volume lifecycle**: `postgres_data` persists across restarts. Destroying the volume (`docker compose down -v`) clears all local data and requires re-running migrations. This is the same behaviour as the native installation, where `dropdb platform` would do the same.
+
