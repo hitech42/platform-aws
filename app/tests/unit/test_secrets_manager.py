@@ -1,4 +1,4 @@
-"""Unit tests for the secrets_manager wrapper — boto3 is fully mocked."""
+"""Unit tests for the SecretsManagerService wrapper — boto3 is fully mocked."""
 
 from unittest.mock import MagicMock, patch
 
@@ -6,7 +6,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from app.src.core.exceptions import ConflictError, ValidationError
-from app.src.services.secrets_manager import create_app_secret
+from app.src.services.secrets_manager_service import SecretsManagerService
 
 
 def _make_client_error(code: str) -> ClientError:
@@ -21,7 +21,7 @@ def _make_client_error(code: str) -> ClientError:
 
 def test_generate_value_false_raises_validation_error() -> None:
     with pytest.raises(ValidationError) as exc_info:
-        create_app_secret(
+        SecretsManagerService().create_app_secret(
             service_name="svc",
             logical_name="db-pass",
             environment="dev",
@@ -42,8 +42,8 @@ def test_create_app_secret_returns_arn() -> None:
         "Name": "platform/svc/dev/db-pass",
     }
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
-        arn = create_app_secret(
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
+        arn = SecretsManagerService().create_app_secret(
             service_name="svc",
             logical_name="db-pass",
             environment="dev",
@@ -57,8 +57,8 @@ def test_create_app_secret_uses_correct_secret_name() -> None:
     mock_client = MagicMock()
     mock_client.create_secret.return_value = {"ARN": "arn:aws:sm:::secret:x"}
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
-        create_app_secret(
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
+        SecretsManagerService().create_app_secret(
             service_name="payments",
             logical_name="stripe-key",
             environment="staging",
@@ -73,8 +73,8 @@ def test_create_app_secret_uses_provided_description() -> None:
     mock_client = MagicMock()
     mock_client.create_secret.return_value = {"ARN": "arn:aws:sm:::secret:x"}
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
-        create_app_secret(
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
+        SecretsManagerService().create_app_secret(
             service_name="svc",
             logical_name="key",
             environment="dev",
@@ -90,8 +90,8 @@ def test_create_app_secret_generates_default_description_when_none() -> None:
     mock_client = MagicMock()
     mock_client.create_secret.return_value = {"ARN": "arn:aws:sm:::secret:x"}
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
-        create_app_secret(
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
+        SecretsManagerService().create_app_secret(
             service_name="svc",
             logical_name="key",
             environment="dev",
@@ -113,9 +113,9 @@ def test_create_app_secret_value_not_logged(caplog: pytest.LogCaptureFixture) ->
     mock_client = MagicMock()
     mock_client.create_secret.side_effect = capture_create
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
         with caplog.at_level("DEBUG"):
-            create_app_secret(
+            SecretsManagerService().create_app_secret(
                 service_name="svc",
                 logical_name="key",
                 environment="dev",
@@ -134,9 +134,9 @@ def test_resource_exists_raises_conflict_error() -> None:
     mock_client = MagicMock()
     mock_client.create_secret.side_effect = _make_client_error("ResourceExistsException")
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
         with pytest.raises(ConflictError) as exc_info:
-            create_app_secret(
+            SecretsManagerService().create_app_secret(
                 service_name="svc",
                 logical_name="db-pass",
                 environment="dev",
@@ -151,9 +151,9 @@ def test_other_client_error_propagates() -> None:
     mock_client = MagicMock()
     mock_client.create_secret.side_effect = _make_client_error("AccessDeniedException")
 
-    with patch("app.src.services.secrets_manager.boto3.client", return_value=mock_client):
+    with patch("app.src.services.secrets_manager_service.boto3.client", return_value=mock_client):
         with pytest.raises(ClientError):
-            create_app_secret(
+            SecretsManagerService().create_app_secret(
                 service_name="svc",
                 logical_name="key",
                 environment="dev",
@@ -166,7 +166,8 @@ def test_other_client_error_propagates() -> None:
 
 def test_endpoint_url_forwarded_to_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "app.src.services.secrets_manager.settings.aws_endpoint_url", "http://localhost:4566"
+        "app.src.services.secrets_manager_service.settings.aws_endpoint_url",
+        "http://localhost:4566",
     )
 
     captured_kwargs: dict[str, object] = {}
@@ -177,8 +178,9 @@ def test_endpoint_url_forwarded_to_boto3(monkeypatch: pytest.MonkeyPatch) -> Non
         mock.create_secret.return_value = {"ARN": "arn:aws:sm:::secret:x"}
         return mock
 
-    with patch("app.src.services.secrets_manager.boto3.client", side_effect=fake_boto_client):
-        create_app_secret(
+    _target = "app.src.services.secrets_manager_service.boto3.client"
+    with patch(_target, side_effect=fake_boto_client):
+        SecretsManagerService().create_app_secret(
             service_name="svc",
             logical_name="key",
             environment="dev",
@@ -189,7 +191,7 @@ def test_endpoint_url_forwarded_to_boto3(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_no_endpoint_url_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.src.services.secrets_manager.settings.aws_endpoint_url", None)
+    monkeypatch.setattr("app.src.services.secrets_manager_service.settings.aws_endpoint_url", None)
 
     captured_kwargs: dict[str, object] = {}
 
@@ -199,8 +201,9 @@ def test_no_endpoint_url_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
         mock.create_secret.return_value = {"ARN": "arn:aws:sm:::secret:x"}
         return mock
 
-    with patch("app.src.services.secrets_manager.boto3.client", side_effect=fake_boto_client):
-        create_app_secret(
+    _target = "app.src.services.secrets_manager_service.boto3.client"
+    with patch(_target, side_effect=fake_boto_client):
+        SecretsManagerService().create_app_secret(
             service_name="svc",
             logical_name="key",
             environment="dev",

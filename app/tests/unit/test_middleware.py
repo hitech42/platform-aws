@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import structlog.testing
 from fastapi import APIRouter
@@ -26,10 +26,6 @@ def _events(request_id: uuid.UUID) -> list:  # type: ignore[type-arg]
 
 app.include_router(_test_router)
 client = TestClient(app)
-
-# Prefix shared across the two provisioning-outcome tests — avoids repeated long strings.
-_ROUTE = "app.src.api.v1.routes.secret_requests"
-
 
 # ── request log is emitted ─────────────────────────────────────────────────────
 
@@ -148,7 +144,12 @@ def test_from_and_to_status_included_when_set_on_request_state() -> None:
 
 def test_provisioning_outcome_provisioned_event_shape() -> None:
     """The CloudWatch metric filter event must have exactly the right shape."""
-    from app.src.db.session import get_db
+    from app.src.repositories.request_event_repository import RequestEventRepository
+    from app.src.repositories.secret_request_repository import SecretRequestRepository
+    from app.src.repositories.service_repository import ServiceRepository
+    from app.src.services.dependencies import get_secret_request_lifecycle_service
+    from app.src.services.secret_request_lifecycle_service import SecretRequestLifecycleService
+    from app.src.services.secrets_manager_service import SecretsManagerService
 
     svc_id = uuid.uuid4()
     req_id = uuid.uuid4()
@@ -171,22 +172,31 @@ def test_provisioning_outcome_provisioned_event_shape() -> None:
 
     fake_arn = "arn:aws:secretsmanager:us-east-1:123:secret:platform/my-svc/dev/db-pass"
 
-    with (
-        patch(f"{_ROUTE}.secret_requests_svc.get_request", return_value=mock_req),
-        patch(f"{_ROUTE}.service_catalog.get_service", return_value=mock_svc),
-        patch(f"{_ROUTE}.secrets_manager_svc.create_app_secret", return_value=fake_arn),
-        patch(f"{_ROUTE}.request_lifecycle.transition"),
-    ):
-        mock_db = MagicMock()
-        app.dependency_overrides[get_db] = lambda: mock_db
-        try:
-            with structlog.testing.capture_logs() as logs:
-                client.post(
-                    f"/api/v1/secret-requests/{req_id}/approve",
-                    json={"approver_email": "ops@co.com"},
-                )
-        finally:
-            app.dependency_overrides.clear()
+    mock_secret_request_repo = MagicMock(spec=SecretRequestRepository)
+    mock_request_event_repo = MagicMock(spec=RequestEventRepository)
+    mock_service_repo = MagicMock(spec=ServiceRepository)
+    mock_secrets_manager_service = MagicMock(spec=SecretsManagerService)
+    mock_secret_request_repo.get_for_update.return_value = mock_req
+    mock_service_repo.get_by_id.return_value = mock_svc
+    mock_secrets_manager_service.create_app_secret.return_value = fake_arn
+
+    svc = SecretRequestLifecycleService(
+        db=MagicMock(),
+        secrets_manager_service=mock_secrets_manager_service,
+        secret_request_repo=mock_secret_request_repo,
+        request_event_repo=mock_request_event_repo,
+        service_repo=mock_service_repo,
+    )
+
+    app.dependency_overrides[get_secret_request_lifecycle_service] = lambda: svc
+    try:
+        with structlog.testing.capture_logs() as logs:
+            client.post(
+                f"/api/v1/secret-requests/{req_id}/approve",
+                json={"approver_email": "ops@co.com"},
+            )
+    finally:
+        app.dependency_overrides.clear()
 
     outcome_logs = [e for e in logs if e.get("event") == "secret_provisioning_outcome"]
     assert len(outcome_logs) == 1
@@ -198,7 +208,12 @@ def test_provisioning_outcome_provisioned_event_shape() -> None:
 
 def test_provisioning_outcome_failed_event_shape() -> None:
     """The FAILED outcome must emit secret_provisioning_outcome with outcome=failed."""
-    from app.src.db.session import get_db
+    from app.src.repositories.request_event_repository import RequestEventRepository
+    from app.src.repositories.secret_request_repository import SecretRequestRepository
+    from app.src.repositories.service_repository import ServiceRepository
+    from app.src.services.dependencies import get_secret_request_lifecycle_service
+    from app.src.services.secret_request_lifecycle_service import SecretRequestLifecycleService
+    from app.src.services.secrets_manager_service import SecretsManagerService
 
     svc_id = uuid.uuid4()
     req_id = uuid.uuid4()
@@ -219,22 +234,31 @@ def test_provisioning_outcome_failed_event_shape() -> None:
     mock_svc.id = svc_id
     mock_svc.name = "my-svc"
 
-    with (
-        patch(f"{_ROUTE}.secret_requests_svc.get_request", return_value=mock_req),
-        patch(f"{_ROUTE}.service_catalog.get_service", return_value=mock_svc),
-        patch(f"{_ROUTE}.secrets_manager_svc.create_app_secret", side_effect=RuntimeError("boom")),
-        patch(f"{_ROUTE}.request_lifecycle.transition"),
-    ):
-        mock_db = MagicMock()
-        app.dependency_overrides[get_db] = lambda: mock_db
-        try:
-            with structlog.testing.capture_logs() as logs:
-                client.post(
-                    f"/api/v1/secret-requests/{req_id}/approve",
-                    json={"approver_email": "ops@co.com"},
-                )
-        finally:
-            app.dependency_overrides.clear()
+    mock_secret_request_repo = MagicMock(spec=SecretRequestRepository)
+    mock_request_event_repo = MagicMock(spec=RequestEventRepository)
+    mock_service_repo = MagicMock(spec=ServiceRepository)
+    mock_secrets_manager_service = MagicMock(spec=SecretsManagerService)
+    mock_secret_request_repo.get_for_update.return_value = mock_req
+    mock_service_repo.get_by_id.return_value = mock_svc
+    mock_secrets_manager_service.create_app_secret.side_effect = RuntimeError("boom")
+
+    svc = SecretRequestLifecycleService(
+        db=MagicMock(),
+        secrets_manager_service=mock_secrets_manager_service,
+        secret_request_repo=mock_secret_request_repo,
+        request_event_repo=mock_request_event_repo,
+        service_repo=mock_service_repo,
+    )
+
+    app.dependency_overrides[get_secret_request_lifecycle_service] = lambda: svc
+    try:
+        with structlog.testing.capture_logs() as logs:
+            client.post(
+                f"/api/v1/secret-requests/{req_id}/approve",
+                json={"approver_email": "ops@co.com"},
+            )
+    finally:
+        app.dependency_overrides.clear()
 
     outcome_logs = [e for e in logs if e.get("event") == "secret_provisioning_outcome"]
     assert len(outcome_logs) == 1

@@ -33,8 +33,9 @@ This service lets internal dev teams self-serve platform requests without openin
 │   │   ├── core/        ← config (pydantic-settings) + logging (structlog) + runtime_config/
 │   │   ├── db/          ← SQLAlchemy engine, session factory, Alembic migrations
 │   │   ├── models/      ← SQLAlchemy ORM models (Base lives here)
+│   │   ├── repositories/ ← all DB access; one class per aggregate (flush, never commit)
 │   │   ├── schemas/     ← Pydantic request/response schemas
-│   │   └── services/    ← business logic; one module per domain
+│   │   └── services/    ← business logic classes + dependency providers
 │   ├── tests/
 │   │   ├── unit/        ← mock external deps (boto3, DB)
 │   │   └── integration/ ← use testcontainers (Postgres + LocalStack)
@@ -52,7 +53,7 @@ This service lets internal dev teams self-serve platform requests without openin
 
 ## Testing Conventions
 
-- **Unit tests** (`tests/unit/`): fast, no I/O. Mock boto3 clients and DB sessions with `unittest.mock`.
+- **Unit tests** (`tests/unit/`): fast, no I/O. Mock repositories and external clients (boto3) with `unittest.mock`. Service tests inject mocked repository instances; repository tests mock the SQLAlchemy session.
 - **Integration tests** (`tests/integration/`): use `testcontainers` to spin up real Postgres and LocalStack. Each test suite manages its own container lifecycle.
 - **`client` fixture** (`tests/integration/conftest.py`): use this instead of constructing `TestClient` manually. It overrides `get_db` to point at the testcontainers engine and clears overrides after each test. Secrets Manager calls must still be mocked with `unittest.mock.patch`.
 - **Asyncio**: `pytest-asyncio` with `asyncio_mode = "auto"` — all async test functions are discovered automatically.
@@ -106,28 +107,68 @@ class ValidationError(AppError):    # 422, code="VALIDATION_ERROR"
 
 This keeps the service layer free of FastAPI imports and makes domain errors unit-testable without an HTTP client.
 
-## Service Layer Conventions
+## Architecture: Layered Pattern
 
-- Service functions **flush but never commit** — the route handler commits and then refreshes the object to load any server-generated values (`created_at`, `updated_at`).
-- The pattern is always: `service_fn(db, ...)` → `db.commit()` → `db.refresh(obj)` → `return schema.model_validate(obj)`.
-- For operations that call an external service (Secrets Manager) after a DB state change, commit the intermediate DB state first so it is durable even if the external call fails.
+The application follows a three-layer architecture. Each layer has a single responsibility:
+
+```
+Route handlers  (app/src/api/v1/routes/)
+    ↓ inject via Depends()
+Service classes (app/src/services/*_service.py)
+    ↓ inject via constructor
+Repository classes (app/src/repositories/)
+    ↓ wrap
+SQLAlchemy Session / boto3
+```
+
+### Route layer
+
+Thin HTTP handlers. Receive injected service classes via `Depends()`, call a single service method, and return a validated Pydantic schema. No business logic, no direct DB access.
+
+### Service layer
+
+Business logic classes injected with repository instances and a `Session`. Services **commit and refresh** — the repository only flushes. The pattern is:
+
+```
+repo.create(...)  →  db.commit()  →  db.refresh(obj)  →  return obj
+```
+
+For operations that call an external service (Secrets Manager) after a DB state change, commit the intermediate state first so it is durable even if the external call fails (the approve flow commits twice: once after `PROVISIONING`, once after `PROVISIONED`/`FAILED`).
+
+Raise typed domain exceptions from the service layer; never raise `HTTPException` there. See the exception-handling pattern in the API Conventions section.
+
+### Repository layer
+
+All SQLAlchemy access lives here. Repositories **flush but never commit** — the service controls the transaction boundary. One class per aggregate:
+
+| Class | File | Responsibilities |
+|---|---|---|
+| `ServiceRepository` | `repositories/service_repository.py` | CRUD for `services` table |
+| `SecretRequestRepository` | `repositories/secret_request_repository.py` | CRUD + `SELECT FOR UPDATE` for approve flow |
+| `RequestEventRepository` | `repositories/request_event_repository.py` | Append-only audit events |
+| `ConfigRepository` | `repositories/config_repository.py` | Key/value config reads |
+| `HealthRepository` | `repositories/health_repository.py` | `SELECT 1` DB connectivity ping |
+
+### Dependency wiring
+
+All `Depends()` provider functions (`get_*_repository`, `get_*_service`) live in `app/src/services/dependencies.py`. FastAPI deduplicates identical `Depends(get_db)` calls so all repositories in a request share one `Session` and one transaction.
 
 ## State Machine
 
-`app/src/services/request_lifecycle.py` owns all status transitions:
+`SecretRequestLifecycleService` in `app/src/services/secret_request_lifecycle_service.py` owns all status transitions:
 
 ```
 PENDING → APPROVED → PROVISIONING → PROVISIONED
                                   ↘ FAILED
 ```
 
-`VALID_TRANSITIONS` is a `dict[str, frozenset[str]]` that maps each status to the set of allowed next statuses. The `transition(db, request, new_status, actor, detail)` function:
-1. Raises `InvalidStateError` if the transition is not in `VALID_TRANSITIONS`.
+`_VALID_TRANSITIONS` is a private class attribute (`dict[str, frozenset[str]]`) that maps each status to the set of allowed next statuses. The `_transition(request, new_status, actor, detail)` method:
+1. Raises `InvalidStateError` if the transition is not in `_VALID_TRANSITIONS`.
 2. Updates `request.status` in place.
-3. Inserts an immutable `RequestEvent` row (actor + detail + timestamp).
-4. Calls `db.flush()` — does not commit.
+3. Delegates to `RequestEventRepository.create()` to insert an immutable audit event row.
+4. The repository flushes; the service does not commit here.
 
-The `approve` route commits twice: once after `PROVISIONING` (before the AWS call) and once after `PROVISIONED`/`FAILED`. Any exception from Secrets Manager is caught and written as a `FAILED` event rather than propagated as a 500.
+`approve_request` commits twice: once after `PROVISIONING` (before the AWS call) and once after `PROVISIONED`/`FAILED`. Any exception from Secrets Manager is caught and written as a `FAILED` event rather than propagated as a 500.
 
 ## Secrets Manager Conventions
 
@@ -140,7 +181,7 @@ The `approve` route commits twice: once after `PROVISIONING` (before the AWS cal
 
 `GET /api/v1/secret-requests/{id}/summary` returns two independent sections:
 
-- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_checks.py` from Postgres data. The LLM never determines facts.
+- **`facts`** — always present, always correct. Computed deterministically by `app/src/services/risk_check_service.py` from Postgres data. The LLM never determines facts.
 - **`narrative`** — generated text from the active LLM provider. May be `null` if the provider fails. Its absence must never prevent callers from reading `facts`.
 
 ### Design rule (ADR-017)
@@ -163,18 +204,18 @@ class NarrativeProvider(Protocol):
     def generate_narrative(self, prompt: str) -> str: ...
 ```
 
-`get_active_provider(db: Session) -> NarrativeProvider` returns one of two pre-instantiated module-level singletons:
+`get_active_provider(config_repo: ConfigRepository) -> NarrativeProvider` returns one of two pre-instantiated module-level singletons:
 
 - **`BedrockNarrativeProvider`** — Bedrock Runtime `converse` API. Model: `us.anthropic.claude-haiku-4-5-20251001-v1:0`. Returns a `[stub]` string immediately when `settings.aws_endpoint_url` is set (LocalStack CE has no Bedrock).
 - **`AnthropicAPINarrativeProvider`** — Anthropic Python SDK `messages.create`. Model: `claude-haiku-4-5-20251001`. Uses lazy client init (avoids `AuthenticationError` at startup when no key is configured). API key loaded once at import time via `_load_anthropic_api_key()`: first from `settings.anthropic_api_key` (env var), then from Secrets Manager at `/{environment}/platform/anthropic-api-key` (only when `aws_endpoint_url` is `None`).
 
 Both raise `NarrativeError` (defined in `app/src/core/exceptions.py`) on failure. `NarrativeError` does **not** inherit `AppError` — it carries no HTTP status code and is caught locally by the summary route, which sets `narrative=null` and `narrative_error=<message>` rather than propagating a 500.
 
-`narrative_generated_by` is a `Literal["bedrock", "stub", "anthropic_api"]` (or `null` on error). The summary route determines it by `isinstance(provider, BedrockNarrativeProvider)` + `settings.aws_endpoint_url` check — never by interrogating the narrative text itself.
+`narrative_generated_by` is a `Literal["bedrock", "stub", "anthropic_api"]` (or `null` on error). `NarrativeService.generate_summary` determines it by `isinstance(provider, BedrockNarrativeProvider)` + `settings.aws_endpoint_url` check — never by interrogating the narrative text itself.
 
 ### `requested_by` extraction
 
-`SecretRequest` has no `requested_by` column. The field is stored as the `actor` of the first `PENDING` `RequestEvent`. The summary route extracts it with:
+`SecretRequest` has no `requested_by` column. The field is stored as the `actor` of the first `PENDING` `RequestEvent`. `NarrativeService.generate_summary` extracts it with:
 
 ```python
 requested_by = next((e.actor for e in events if e.status == "PENDING"), "unknown")
@@ -211,7 +252,7 @@ In local dev, set `ANTHROPIC_API_KEY` in `.env` instead — the Secrets Manager 
 |---|---|---|---|
 | `llm_provider_config.py` | `llm_provider` | `anthropic_api` | 30 s |
 
-Pattern: a class with `_cached_value`, `_cached_at`, and `_ttl` instance attributes. `get(db: Session) -> str` returns the cached value when fresh, otherwise queries `SELECT value FROM config WHERE key = ?`. On DB error, the cached value is used if available; otherwise the module default is returned. Cache is reset via `_reset_cache()` (used in tests via the module-level singleton).
+Pattern: a class with `_cached_value`, `_cached_at`, and `_ttl` instance attributes. `get(config_repo: ConfigRepository) -> str` returns the cached value when fresh, otherwise calls `config_repo.get_value(key)`. On DB error, the cached value is used if available; otherwise the module default is returned. Cache is reset via `_reset_cache()` (used in tests via the module-level singleton).
 
 ## AWS / LocalStack Conventions
 
@@ -290,7 +331,7 @@ Health paths (`/healthz`, `/readyz`) are logged at `DEBUG` to suppress noise in 
 
 ### Provisioning outcome events
 
-The `approve` route emits a dedicated `secret_provisioning_outcome` log event after every Secrets Manager call so CloudWatch Logs metric filters can count successes and failures without parsing request logs:
+`SecretRequestLifecycleService.approve_request` emits a dedicated `secret_provisioning_outcome` log event after every Secrets Manager call so CloudWatch Logs metric filters can count successes and failures without parsing request logs:
 
 ```python
 # success
@@ -308,7 +349,7 @@ Example CloudWatch Logs metric filter patterns:
 The full alerting chain is realized in `infra/modules/observability/main.tf`:
 
 ```
-structlog event (app/src/api/v1/secret_requests.py)
+structlog event (app/src/services/secret_request_lifecycle_service.py)
   → awslogs driver → CloudWatch Logs (/ecs/cvs-platform-dev)
   → aws_cloudwatch_log_metric_filter (CVSPlatform/Application::SecretProvisioningFailures)
   → aws_cloudwatch_metric_alarm (cvs-platform-dev-secret-provisioning-failures)

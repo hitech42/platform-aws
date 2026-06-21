@@ -6,34 +6,26 @@ appears under two different base paths:
   GET   /secret-requests/{request_id}
   GET   /secret-requests/{request_id}/events
   POST  /secret-requests/{request_id}/approve
+  GET   /secret-requests/{request_id}/summary
 """
 
 import uuid
 
-import structlog
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
 
-from app.src.core.config import settings
-from app.src.core.exceptions import NarrativeError
-from app.src.db.session import get_db
 from app.src.schemas.secret_request import (
     ApproveRequest,
-    NarrativeSource,
     RequestEventRead,
-    RiskFlagsRead,
     SecretRequestBody,
     SecretRequestRead,
     SecretRequestSummaryRead,
 )
-from app.src.services import request_lifecycle, service_catalog
-from app.src.services import secret_requests as secret_requests_svc
-from app.src.services import secrets_manager as secrets_manager_svc
-from app.src.services.bedrock import build_prompt
-from app.src.services.llm_provider import BedrockNarrativeProvider, get_active_provider
-from app.src.services.risk_checks import compute_risk_flags
-
-log = structlog.get_logger(__name__)
+from app.src.services.dependencies import (
+    get_narrative_service,
+    get_secret_request_lifecycle_service,
+)
+from app.src.services.narrative_service import NarrativeService
+from app.src.services.secret_request_lifecycle_service import SecretRequestLifecycleService
 
 router = APIRouter(tags=["secret-requests"])
 
@@ -46,20 +38,18 @@ router = APIRouter(tags=["secret-requests"])
 def create_secret_request(
     service_id: uuid.UUID,
     body: SecretRequestBody,
-    db: Session = Depends(get_db),
+    svc: SecretRequestLifecycleService = Depends(get_secret_request_lifecycle_service),
 ) -> SecretRequestRead:
-    req = secret_requests_svc.create_request(db, service_id, body)
-    db.commit()
-    db.refresh(req)
+    req = svc.create_request(service_id, body)
     return SecretRequestRead.model_validate(req)
 
 
 @router.get("/secret-requests/{request_id}", response_model=SecretRequestRead)
 def get_secret_request(
     request_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    svc: SecretRequestLifecycleService = Depends(get_secret_request_lifecycle_service),
 ) -> SecretRequestRead:
-    req = secret_requests_svc.get_request(db, request_id)
+    req = svc.get_request(request_id)
     return SecretRequestRead.model_validate(req)
 
 
@@ -69,9 +59,9 @@ def get_secret_request(
 )
 def list_events(
     request_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    svc: SecretRequestLifecycleService = Depends(get_secret_request_lifecycle_service),
 ) -> list[RequestEventRead]:
-    events = secret_requests_svc.list_events(db, request_id)
+    events = svc.get_events(request_id)
     return [RequestEventRead.model_validate(e) for e in events]
 
 
@@ -80,61 +70,13 @@ def approve_secret_request(
     request_id: uuid.UUID,
     body: ApproveRequest,
     request: Request,
-    db: Session = Depends(get_db),
+    svc: SecretRequestLifecycleService = Depends(get_secret_request_lifecycle_service),
 ) -> SecretRequestRead:
-    req = secret_requests_svc.get_request(db, request_id, for_update=True)
-    service = service_catalog.get_service(db, req.service_id)
-
-    # Capture initial status for the request-log middleware (from_status/to_status
-    # are read by RequestLoggingMiddleware after this handler returns).
-    request.state.from_status = req.status
-
-    # Validate state and move to PROVISIONING — commit so the state is durable
-    # before the external AWS call begins.
-    request_lifecycle.transition(db, req, "APPROVED", actor=body.approver_email)
-    request_lifecycle.transition(db, req, "PROVISIONING", actor="system")
-    db.commit()
-    db.refresh(req)
-
-    # Call Secrets Manager; record PROVISIONED or FAILED regardless of outcome.
-    try:
-        arn = secrets_manager_svc.create_app_secret(
-            service_name=service.name,
-            logical_name=req.logical_name,
-            environment=req.environment,
-            generate_value=True,
-            description=req.description,
-        )
-        req.secret_arn = arn
-        request_lifecycle.transition(db, req, "PROVISIONED", actor="system", detail=arn)
-        # ↓ CloudWatch Logs metric filter target — do not change event name or outcome field.
-        # Metric filter: { $.event = "secret_provisioning_outcome" && $.outcome = "provisioned" }
-        # drives the success counter; "failed" drives the failure-rate alarm.
-        log.info(
-            "secret_provisioning_outcome",
-            outcome="provisioned",
-            request_id=str(req.id),
-            service_id=str(req.service_id),
-            environment=req.environment,
-            arn=arn,
-        )
-    except Exception as exc:
-        detail = str(exc)[:2000]
-        request_lifecycle.transition(db, req, "FAILED", actor="system", detail=detail)
-        # ↓ CloudWatch Logs metric filter target — see comment above.
-        log.warning(
-            "secret_provisioning_outcome",
-            outcome="failed",
-            request_id=str(req.id),
-            service_id=str(req.service_id),
-            environment=req.environment,
-            error=detail,
-        )
-
-    db.commit()
-    db.refresh(req)
-    request.state.to_status = req.status
-    return SecretRequestRead.model_validate(req)
+    result = svc.approve_request(request_id, body.approver_email)
+    # Set from_status/to_status on request.state for RequestLoggingMiddleware.
+    request.state.from_status = result.from_status
+    request.state.to_status = result.request.status
+    return SecretRequestRead.model_validate(result.request)
 
 
 @router.get(
@@ -143,53 +85,13 @@ def approve_secret_request(
 )
 def get_secret_request_summary(
     request_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    svc: NarrativeService = Depends(get_narrative_service),
 ) -> SecretRequestSummaryRead:
     """Return deterministic risk facts plus an LLM-generated narrative.
 
-    Facts are computed deterministically from DB data and are always present
-    regardless of LLM availability.  The narrative may be null if the active
-    provider fails — that is an expected degraded state, not an error.
-    The active provider (Bedrock or Anthropic API) is read from the config
-    table with a 30 s TTL cache; switch providers via a psql UPDATE, no redeploy.
+    Facts are always present regardless of LLM availability. The narrative
+    may be null if the active provider fails — expected degraded state.
+    Switch providers via a psql UPDATE to the config table; takes effect
+    within 30 seconds, no redeploy needed.
     """
-    req = secret_requests_svc.get_request(db, request_id)
-    service = service_catalog.get_service(db, req.service_id)
-    events = secret_requests_svc.list_events(db, request_id)
-
-    # requested_by lives on the first PENDING event (actor field), not on the
-    # SecretRequest row itself.  Fall back to "unknown" if events are missing.
-    requested_by = next(
-        (e.actor for e in events if e.status == "PENDING"),
-        "unknown",
-    )
-
-    risk_flags = compute_risk_flags(req, service, requested_by)
-
-    provider = get_active_provider(db)
-    prompt = build_prompt(events, risk_flags, req, service)
-
-    narrative: str | None = None
-    error: str | None = None
-    try:
-        narrative = provider.generate_narrative(prompt)
-    except NarrativeError as exc:
-        error = exc.message
-
-    generated_by: NarrativeSource | None
-    if error is not None:
-        generated_by = None
-    elif isinstance(provider, BedrockNarrativeProvider) and settings.aws_endpoint_url:
-        generated_by = "stub"
-    elif isinstance(provider, BedrockNarrativeProvider):
-        generated_by = "bedrock"
-    else:
-        generated_by = "anthropic_api"
-
-    return SecretRequestSummaryRead(
-        id=req.id,
-        facts=RiskFlagsRead(**risk_flags),
-        narrative=narrative,
-        narrative_generated_by=generated_by,
-        narrative_error=error,
-    )
+    return svc.generate_summary(request_id)

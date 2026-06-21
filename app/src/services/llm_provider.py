@@ -29,11 +29,11 @@ import anthropic
 import boto3
 import structlog
 from botocore.exceptions import ClientError
-from sqlalchemy.orm import Session
 
 from app.src.core.config import settings
 from app.src.core.exceptions import NarrativeError
 from app.src.core.runtime_config.llm_provider_config import llm_provider_config
+from app.src.repositories.config_repository import ConfigRepository
 
 log = structlog.get_logger(__name__)
 
@@ -161,9 +161,9 @@ _bedrock_provider = BedrockNarrativeProvider()
 _anthropic_provider = AnthropicAPINarrativeProvider(_ANTHROPIC_API_KEY)
 
 
-def get_active_provider(db: Session) -> NarrativeProvider:
+def get_active_provider(config_repo: ConfigRepository) -> NarrativeProvider:
     """Return the pre-instantiated provider selected by the cached runtime config."""
-    provider_name = llm_provider_config.get(db)
+    provider_name = llm_provider_config.get(config_repo)
     if provider_name == "bedrock":
         return _bedrock_provider
     return _anthropic_provider
