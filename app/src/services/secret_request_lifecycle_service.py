@@ -18,12 +18,13 @@ from dataclasses import dataclass
 import structlog
 from sqlalchemy.orm import Session
 
-from app.src.core.exceptions import InvalidStateError, NotFoundError
+from app.src.core.exceptions import ConflictError, InvalidStateError, NotFoundError, ValidationError
 from app.src.models.request_event import RequestEvent
 from app.src.models.secret_request import SecretRequest
 from app.src.repositories.request_event_repository import RequestEventRepository
 from app.src.repositories.secret_request_repository import SecretRequestRepository
 from app.src.repositories.service_repository import ServiceRepository
+from app.src.schemas.secret_request import SecretRequestBody
 from app.src.services import secrets_manager as secrets_manager_svc
 
 log = structlog.get_logger(__name__)
@@ -60,44 +61,34 @@ class SecretRequestLifecycleService:
 
     # ── public methods ─────────────────────────────────────────────────────────
 
-    def create_request(
-        self,
-        service_id: uuid.UUID,
-        body_logical_name: str,
-        body_environment: str,
-        body_description: str | None,
-        body_generate_value: bool,
-        body_requested_by: str | None,
-    ) -> SecretRequest:
-        from app.src.core.exceptions import ConflictError, ValidationError
-
+    def create_request(self, service_id: uuid.UUID, body: SecretRequestBody) -> SecretRequest:
         if self._service_repo.get_by_id(service_id) is None:
             raise NotFoundError(f"Service '{service_id}' not found.", field="service_id")
 
-        if not body_generate_value:
+        if not body.generate_value:
             raise ValidationError(
                 "Caller-supplied secret values are not supported; set generate_value=true.",
                 field="generate_value",
             )
 
         if self._secret_request_repo.exists_for_tuple(
-            service_id, body_logical_name, body_environment
+            service_id, body.logical_name, body.environment
         ):
             raise ConflictError(
-                f"A request for '{body_logical_name}' in '{body_environment}' already exists.",
+                f"A request for '{body.logical_name}' in '{body.environment}' already exists.",
                 field="logical_name",
             )
 
         req = self._secret_request_repo.create(
             service_id=service_id,
-            logical_name=body_logical_name,
-            environment=body_environment,
-            description=body_description,
+            logical_name=body.logical_name,
+            environment=body.environment,
+            description=body.description,
         )
         self._request_event_repo.create(
             secret_request_id=req.id,
             status="PENDING",
-            actor=body_requested_by or "api",
+            actor=body.requested_by or "api",
             detail=None,
         )
         self._db.commit()
