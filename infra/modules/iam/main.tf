@@ -626,6 +626,17 @@ resource "aws_iam_role_policy" "github_deploy" {
         ]
         Resource = "arn:aws:sns:*:*:${var.project_name}-*"
       },
+      {
+        Sid    = "SSMImageURIReadWrite"
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter",
+          "ssm:GetParameter",
+        ]
+        # Scoped to the exact parameter used for ECS image URI tracking.
+        # /* would allow reading/writing any SSM parameter in the account.
+        Resource = "arn:aws:ssm:*:*:parameter/${var.environment}/ecs/image-uri"
+      },
 
     ]
   })
@@ -637,10 +648,26 @@ resource "aws_iam_role_policy" "github_deploy" {
 #   - Pull the container image from ECR                    (added in E2)
 #   - Write container logs to CloudWatch Logs              (added in E2)
 #   - Fetch secret values for environment variable injection (added in E2)
+#   - Read the deployed image URI from SSM                 (added here)
 #
 # The AWS-managed AmazonECSTaskExecutionRolePolicy is NOT attached here because
 # it grants ECR and CloudWatch access without scoping to specific resources.
 # E2 will attach narrowly-scoped inline policies instead.
+
+resource "aws_iam_role_policy" "ecs_task_execution_ssm" {
+  name = "${local.prefix}-ecs-task-execution-ssm"
+  role = aws_iam_role.ecs_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "SSMImageURIRead"
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:*:*:parameter/${var.environment}/ecs/image-uri"
+    }]
+  })
+}
 
 resource "aws_iam_role" "ecs_task_execution" {
   name        = "${local.prefix}-ecs-task-execution"

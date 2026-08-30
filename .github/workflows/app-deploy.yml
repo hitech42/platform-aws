@@ -15,6 +15,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
+  ENVIRONMENT: dev
   ECR_REPOSITORY: cvs-platform
   ECS_CLUSTER: cvs-platform-dev
   ECS_SERVICE: cvs-platform-dev
@@ -56,6 +57,17 @@ jobs:
           fi
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
           echo "Deploying image: ${IMAGE_URI}"
+
+      # ── Update deployed image URI in SSM ────────────────────────────────────
+      # Writes the image URI to SSM before registering the task definition so
+      # that any concurrent Terraform apply also picks up the live image.
+      - name: Update deployed image URI in SSM
+        run: |
+          aws ssm put-parameter \
+            --name "/${ENVIRONMENT}/ecs/image-uri" \
+            --value "${{ steps.image.outputs.image_uri }}" \
+            --type String \
+            --overwrite
 
       # ── Register new task definition revision ────────────────────────────────
       # Fetch the current task definition, swap in the new image, strip fields
