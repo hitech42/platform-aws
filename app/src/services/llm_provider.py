@@ -108,9 +108,18 @@ class AnthropicAPINarrativeProvider:
         # no key is configured (e.g. in local dev with bedrock selected).
         self._client: anthropic.Anthropic | None = None
 
+    def _require_api_key(self) -> str:
+        api_key = (self._api_key or "").strip()
+        if not api_key:
+            raise NarrativeError(
+                "Anthropic API key is not configured. Set ANTHROPIC_API_KEY or switch "
+                "llm_provider to 'bedrock'."
+            )
+        return api_key
+
     def _get_client(self) -> anthropic.Anthropic:
         if self._client is None:
-            self._client = anthropic.Anthropic(api_key=self._api_key)
+            self._client = anthropic.Anthropic(api_key=self._require_api_key())
         return self._client
 
     def generate_narrative(self, prompt: str) -> str:
