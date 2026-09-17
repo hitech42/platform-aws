@@ -71,15 +71,41 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory" {
   alarm_name        = "${local.prefix}-ecs-memory-high"
   alarm_description = "ECS memory utilization above 80% for 10 minutes. Action: check for memory leak or increase task_memory in the ecs-service module variables."
 
-  # Container Insights namespace — requires containerInsights=enabled on the cluster.
-  namespace           = "ECS/ContainerInsights"
-  metric_name         = "MemoryUtilized"
-  dimensions          = { ClusterName = var.ecs_cluster_name, ServiceName = var.ecs_service_name }
-  statistic           = "Average"
-  period              = 300
   evaluation_periods  = 2
   threshold           = 80
   comparison_operator = "GreaterThanThreshold"
+
+  # Container Insights publishes MemoryUtilized (MiB) and MemoryReserved (MiB) for Fargate,
+  # not a pre-computed percentage. Metric math derives the % so the threshold stays at 80
+  # regardless of how much memory the task is allocated.
+  metric_query {
+    id          = "utilization"
+    expression  = "100 * used / reserved"
+    label       = "Memory Utilization %"
+    return_data = true
+  }
+
+  metric_query {
+    id = "used"
+    metric {
+      namespace   = "ECS/ContainerInsights"
+      metric_name = "MemoryUtilized"
+      period      = 300
+      stat        = "Average"
+      dimensions  = { ClusterName = var.ecs_cluster_name, ServiceName = var.ecs_service_name }
+    }
+  }
+
+  metric_query {
+    id = "reserved"
+    metric {
+      namespace   = "ECS/ContainerInsights"
+      metric_name = "MemoryReserved"
+      period      = 300
+      stat        = "Average"
+      dimensions  = { ClusterName = var.ecs_cluster_name, ServiceName = var.ecs_service_name }
+    }
+  }
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
