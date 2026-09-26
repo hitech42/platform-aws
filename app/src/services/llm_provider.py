@@ -8,7 +8,8 @@ Both are pre-instantiated at module import time so there is zero per-request
 overhead for provider construction.  The active provider is selected once per
 request (or from the 30-second TTL cache) via get_active_provider().
 
-Anthropic API key loading order (runs once at import time):
+Anthropic API key loading order (runs at import time and is retried on first use
+when no key was available):
   1. settings.anthropic_api_key  (ANTHROPIC_API_KEY env var / .env file)
   2. AWS Secrets Manager at /{environment}/platform/anthropic-api-key
      — skipped when aws_endpoint_url is set (LocalStack path; real secret
@@ -23,6 +24,7 @@ LocalStack behaviour:
   NarrativeError on the first call (caught and surfaced as narrative=null).
 """
 
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
 import anthropic
@@ -102,15 +104,34 @@ class BedrockNarrativeProvider:
 class AnthropicAPINarrativeProvider:
     """Calls the Anthropic Messages API directly via the anthropic Python SDK."""
 
-    def __init__(self, api_key: str | None) -> None:
+    def __init__(
+        self,
+        api_key: str | None,
+        api_key_loader: Callable[[], str | None] | None = None,
+    ) -> None:
         self._api_key = api_key
+        self._api_key_loader = api_key_loader or _load_anthropic_api_key
         # Client is created lazily to avoid AuthenticationError at startup when
         # no key is configured (e.g. in local dev with bedrock selected).
         self._client: anthropic.Anthropic | None = None
 
+    def _require_api_key(self) -> str:
+        api_key = (self._api_key or "").strip()
+        if not api_key:
+            # A secret may be configured after application startup. Retry once
+            # when the direct Anthropic provider is first used, then cache it.
+            api_key = (self._api_key_loader() or "").strip()
+            self._api_key = api_key or None
+        if not api_key:
+            raise NarrativeError(
+                "Anthropic API key is not configured. Set ANTHROPIC_API_KEY or switch "
+                "llm_provider to 'bedrock'."
+            )
+        return api_key
+
     def _get_client(self) -> anthropic.Anthropic:
         if self._client is None:
-            self._client = anthropic.Anthropic(api_key=self._api_key)
+            self._client = anthropic.Anthropic(api_key=self._require_api_key())
         return self._client
 
     def generate_narrative(self, prompt: str) -> str:
@@ -135,7 +156,7 @@ class AnthropicAPINarrativeProvider:
 
 
 def _load_anthropic_api_key() -> str | None:
-    """Fetch the Anthropic API key once at startup.
+    """Fetch the Anthropic API key from settings or Secrets Manager.
 
     Returns immediately from settings when the env var is present.
     Fetches from Secrets Manager only on real AWS (aws_endpoint_url unset).
