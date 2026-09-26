@@ -177,10 +177,26 @@ def test_anthropic_client_is_created_lazily() -> None:
 
 
 def test_anthropic_raises_clear_error_when_api_key_missing() -> None:
-    provider = AnthropicAPINarrativeProvider(None)
+    provider = AnthropicAPINarrativeProvider(None, api_key_loader=lambda: None)
 
     with pytest.raises(NarrativeError, match="Anthropic API key is not configured"):
         provider.generate_narrative("prompt")
+
+
+def test_anthropic_reloads_api_key_lazily_when_missing_at_startup() -> None:
+    loader = MagicMock(return_value="late-key")
+    provider = AnthropicAPINarrativeProvider(None, api_key_loader=loader)
+
+    with patch("app.src.services.llm_provider.anthropic.Anthropic") as mock_anthropic:
+        client = MagicMock()
+        client.messages.create.return_value = _anthropic_response("generated text")
+        mock_anthropic.return_value = client
+
+        result = provider.generate_narrative("prompt")
+
+    assert result == "generated text"
+    loader.assert_called_once_with()
+    mock_anthropic.assert_called_once_with(api_key="late-key")
 
 
 # ── get_active_provider ──────────────────────────────────────────────────────
