@@ -121,17 +121,42 @@ resource "aws_ecs_cluster" "main" {
   tags = merge(local.tags, { Name = local.prefix })
 }
 
+# ── SSM Parameter: deployed image URI ────────────────────────────────────────
+#
+# Terraform creates this parameter on first apply with the container_image
+# variable value ("placeholder" by default).  CI/CD (app-deploy.yml) overwrites
+# it with the real ECR image URI on every deployment.
+#
+# ignore_changes = [value] ensures Terraform never resets the parameter back to
+# "placeholder" after CI/CD has written the real ECR URI.  The task definition
+# reads from the data source below so that any infrastructure-only Terraform
+# apply (e.g. memory or environment variable change) picks up the currently
+# deployed image rather than the hardcoded placeholder variable.
+
+resource "aws_ssm_parameter" "image_uri" {
+  name  = "/${var.environment}/ecs/image-uri"
+  type  = "String"
+  value = var.container_image
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = merge(local.tags, { Name = "/${var.environment}/ecs/image-uri" })
+}
+
+data "aws_ssm_parameter" "image_uri" {
+  name       = aws_ssm_parameter.image_uri.name
+  depends_on = [aws_ssm_parameter.image_uri]
+}
+
 # ── ECS Task Definition ───────────────────────────────────────────────────────
 #
 # Terraform manages the task definition infrastructure (roles, log config,
 # environment variables, resource limits).  The CI/CD pipeline (app-deploy.yml)
-# manages the IMAGE VERSION by registering a new task definition revision with
-# the commit-SHA-tagged image on each deploy — Terraform state is not updated
-# on each code push, avoiding state drift.
-#
-# container_image defaults to "placeholder" for the initial apply (before any
-# image has been pushed to ECR).  The first real deploy via CI/CD overwrites
-# this with the actual ECR URI + commit SHA tag.
+# manages the IMAGE VERSION by writing the deployed ECR URI to SSM (above) and
+# registering a new task definition revision on each deploy — Terraform reads
+# the current SSM value so any infra-only apply also uses the live image.
 
 resource "aws_ecs_task_definition" "app" {
   family                   = local.prefix
@@ -149,7 +174,7 @@ resource "aws_ecs_task_definition" "app" {
   container_definitions = jsonencode([
     {
       name  = var.project_name
-      image = var.container_image
+      image = data.aws_ssm_parameter.image_uri.value
 
       portMappings = [
         {
