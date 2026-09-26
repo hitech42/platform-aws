@@ -74,3 +74,8 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+claude_resume.txt
+codex_resume.txt
+full-conversation.md
+smoke_test_bedrock.py
